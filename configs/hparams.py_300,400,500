@@ -1,0 +1,519 @@
+## The cuurent hyper-parameters values are not necessarily the best ones for a specific risk.
+def get_hparams_class(dataset_name):
+    """Return the dataset class with the given name."""
+    
+    # This maps your new dataset names to the existing config class
+    # if "RealWorld" in dataset_name:
+    #     dataset_name = "RealWorld" 
+    dataset_name='ALL'  # Forcing ALL for all datasets for now.
+    if dataset_name not in globals():
+        raise NotImplementedError("Dataset not found: {}".format(dataset_name))
+    return globals()[dataset_name]
+
+
+#from adatime framework paper
+
+#3.7.3 Hyper-parameter Search. For each algorithm/dataset combination, we conduct an extensive random hyperparameter search with 100 hyper-parameter combinations. The hyper-parameters are picked by a uniform sampling
+#from a range of predefined values. Details about the specified ranges can be found in Table S1 of the supplementary
+#materials. For each set of hyper-parameters, we calculate the values of the four risks for three different random seeds
+
+class ALL():
+    def __init__(self):
+        super(ALL, self).__init__()
+        self.train_params = {
+            'num_epochs': 40,
+            'batch_size': 32,
+            # 'weight_decay': 1e-4,
+            # 'step_size': 50,
+            # 'lr_decay': 0.5
+
+        }
+        self.alg_hparams = {
+            'NO_ADAPT': {'lr_decay': 0.5,'step_size': 50,'weight_decay': 1e-4,'learning_rate': 1e-3, 'src_cls_loss_wt': 1,'batch_size':400},
+            'TARGET_ONLY': {'learning_rate': 1e-3, 'trg_cls_loss_wt': 1},
+            "SASA": {
+                "disc_lr": 0.01,
+                "lr_decay": 0.9,
+                "optimizer": 'adam',
+                "step_size": 30,
+                "batch_size": 300,
+                "weight_decay": 1e-05,
+                "learning_rate": 0.01,
+                "domain_loss_wt": 8.763468469676504,
+                "src_cls_loss_wt": 5.923679693679467,
+            },
+            "DDC": {
+                "mmd_wt": 2.813039774957536,
+                "disc_lr": 0.005,
+                "lr_decay": 0.7,
+                "optimizer": 'adam',
+                "step_size": 10,
+                "batch_size": 400,
+                "weight_decay": 0.0001,
+                "learning_rate": 0.0005,
+                "domain_loss_wt": 8.454565633320444,
+                "src_cls_loss_wt": 3.0856743455835187,
+            },
+            "CoDATS": {
+                "disc_lr": 0.005,
+                "lr_decay": 0.7,
+                "optimizer": 'adam',
+                "step_size": 30,
+                "batch_size": 500,
+                "weight_decay": 1e-06,
+                "learning_rate": 0.0005,
+                "domain_loss_wt": 7.633294557942864,
+                "src_cls_loss_wt": 3.5133992143878463,
+            },
+            "DANN": {
+                "disc_lr": 0.001,
+                "lr_decay": 0.9,
+                "optimizer": 'adam',
+                "step_size": 30,
+                "batch_size": 500,
+                "weight_decay": 1e-05,
+                "learning_rate": 0.005,
+                "domain_loss_wt": 7.334673366642027,
+                "src_cls_loss_wt": 3.754713196112573,
+            },
+            "DIRT": {
+                "disc_lr": 0.0005,
+                "lr_decay": 0.9,
+                "optimizer": 'adam',
+                "step_size": 10,
+                "batch_size": 400,
+                "cond_ent_wt": 7.862693594263771,
+                "vat_loss_wt": 4.682137661887435,
+                "weight_decay": 0.0001,
+                "learning_rate": 0.01,
+                "domain_loss_wt": 9.448245098078877,
+                "src_cls_loss_wt": 2.168206269984195,
+            },
+            "DSAN": {
+                "mmd_wt": 1.606500105290661,
+                "disc_lr": 0.001,
+                "lr_decay": 0.9,
+                "optimizer": 'adam',
+                "step_size": 30,
+                "batch_size": 500,
+                "weight_decay": 1e-06,
+                "learning_rate": 0.0005,
+                "domain_loss_wt": 0.1189709294477481,
+                "src_cls_loss_wt": 4.854835001025257,
+            },
+            "MMDA": {
+                "mmd_wt": 4.999645124394097,
+                "disc_lr": 0.005,
+                "coral_wt": 8.77913218857175,
+                "lr_decay": 0.9,
+                "optimizer": 'adam',
+                "step_size": 10,
+                "batch_size": 500,
+                "cond_ent_wt": 6.61778016279507,
+                "weight_decay": 1e-06,
+                "learning_rate": 0.01,
+                "src_cls_loss_wt": 2.269033556075943,
+            },
+            "Deep_Coral": {
+                "disc_lr": 0.005,
+                "coral_wt": 9.153371161815665,
+                "lr_decay": 0.5,
+                "optimizer": 'adam',
+                "step_size": 5,
+                "batch_size": 400,
+                "weight_decay": 1e-05,
+                "learning_rate": 0.0005,
+                "src_cls_loss_wt": 6.175179317019223,
+            },
+            "CDAN": {
+                "disc_lr": 0.001,
+                "lr_decay": 0.9,
+                "optimizer": 'adam',
+                "step_size": 30,
+                "batch_size": 500,
+                "cond_ent_wt": 5.245743348197568,
+                "weight_decay": 1e-06,
+                "learning_rate": 0.005,
+                "domain_loss_wt": 6.706813258006348,
+                "src_cls_loss_wt": 9.542895176287576,
+            },
+            "AdvSKM": {
+                "disc_lr": 0.0005,
+                "lr_decay": 0.7,
+                "optimizer": 'adam',
+                "step_size": 10,
+                "batch_size": 400,
+                "weight_decay": 1e-05,
+                "learning_rate": 0.0005,
+                "domain_loss_wt": 2.856919321971118,
+                "src_cls_loss_wt": 0.23652081137490996,
+            },
+            "HoMM": {
+                "disc_lr": 0.005,
+                "hommd_wt": 6.050302714900702,
+                "lr_decay": 0.5,
+                "optimizer": 'adam',
+                "step_size": 30,
+                "batch_size": 500,
+                "weight_decay": 0.0001,
+                "learning_rate": 0.0005,
+                "domain_loss_wt": 1.306292982700177,
+                "src_cls_loss_wt": 3.5430684761933007,
+            },
+            'CoTMix': {
+                "disc_lr": 0.005,
+                "lr_decay": 0.9,
+                "mix_ratio": 0.6217486187866911,
+                "optimizer": 'adam',
+                "step_size": 30,
+                "batch_size": 500,
+                "weight_decay": 1e-06,
+                "learning_rate": 0.005,
+                "src_cls_weight": 0.7513029144759051,
+                "temporal_shift": 10,
+                "trg_cont_weight": 0.8446212743466275,
+                "src_supCon_weight": 0.5817495721974965,
+                "trg_entropy_weight": 0.3717707169649231,
+                       },
+            'MCD': {
+                'weight_decay': 1e-4,'learning_rate': 1e-2, 'src_cls_loss_wt': 9.74, 'domain_loss_wt': 5.43
+                },
+
+            "SWL_Adapt": {
+                "WA_lr": 0.0001,
+                "w_c_T": 0.06176240941695143,
+                "disc_lr": 0.01,
+                "WA_N_hid": 5,
+                "lr_decay": 0.9,
+                "optimizer": 'adam',
+                "step_size": 5,
+                "batch_size": 500,
+                "weight_decay": 0.0001,
+                "learning_rate": 0.0001,
+                "confidence_rate": 0.9,
+            },
+            "uDAR": {
+                "sigma": 0.06066122966269513,
+                "disc_lr": 0.0005,
+                "r_theta": 7.5309464427390305,
+                "lr_decay": 0.9,
+                "kl_weight": 1.333983160261909,
+                "optimizer": 'adam',
+                "step_size": 5,
+                "batch_size": 300,
+                "cmmd_gamma": 0.14683799338514616,
+                "cmmd_weight": 0.4409049436728472,
+                "weight_decay": 1e-06,
+                "learning_rate": 0.00032066464897439453,
+                "temporal_alpha": 0.6743108274637504,
+                "cmmd_lambda_reg": 0.00407374654343358,
+                        },
+
+
+        }
+
+class Pamap2():
+    def __init__(self):
+        super(Pamap2, self).__init__()
+        self.train_params = {
+            'num_epochs': 40,
+            # 'batch_size': 32,
+            # 'weight_decay': 1e-4,
+            # 'step_size': 50,
+            # 'lr_decay': 0.5
+
+        }
+        self.alg_hparams = {
+            'NO_ADAPT': {'learning_rate': 1e-3, 'src_cls_loss_wt': 1},
+            'TARGET_ONLY': {'learning_rate': 1e-3, 'trg_cls_loss_wt': 1},
+            "SASA": {
+                "disc_lr": 0.005,
+                "lr_decay": 0.9,
+                "optimizer": 'adam',
+                "step_size": 5,
+                "weight_decay": 0.0001,
+                "learning_rate": 0.005,
+                "domain_loss_wt": 9.963547509753422,
+                "src_cls_loss_wt": 4.7539133048431275,
+            },
+            "DDC": {
+                "mmd_wt": 9.861484108082813,
+                "disc_lr": 0.0005,
+                "lr_decay": 0.7,
+                "optimizer": 'adam',
+                "step_size": 5,
+                "weight_decay": 1e-06,
+                "learning_rate": 0.001,
+                "domain_loss_wt": 3.047041490886561,
+                "src_cls_loss_wt": 1.9128429491463033,
+            },
+            "CoDATS": {
+                "disc_lr": 0.0005,
+                "lr_decay": 0.7,
+                "optimizer": 'adam',
+                "step_size": 30,
+                "weight_decay": 0.0001,
+                "learning_rate": 0.01,
+                "domain_loss_wt": 9.822460063985496,
+                "src_cls_loss_wt": 3.302499267304407,
+            },
+            "DANN": {
+                "disc_lr": 0.0005,
+                "lr_decay": 0.5,
+                "optimizer": 'adam',
+                "step_size": 5,
+                "weight_decay": 1e-05,
+                "learning_rate": 0.005,
+                "domain_loss_wt": 0.69743724621679,
+                "src_cls_loss_wt": 6.826881529119795,
+            },
+            "DIRT": {
+                "disc_lr": 0.001,
+                "lr_decay": 0.5,
+                "optimizer": 'adam',
+                "step_size": 30,
+                "cond_ent_wt": 4.180094521492268,
+                "vat_loss_wt": 7.043566576058389,
+                "weight_decay": 0.0001,
+                "learning_rate": 0.0005,
+                "domain_loss_wt": 1.2208598228833505,
+                "src_cls_loss_wt": 5.0877880691353505,
+            },
+            "DSAN": {
+                "mmd_wt": 4.589467575983747,
+                "disc_lr": 0.01,
+                "lr_decay": 0.7,
+                "optimizer": 'adam',
+                "step_size": 10,
+                "weight_decay": 0.0001,
+                "learning_rate": 0.005,
+                "domain_loss_wt": 2.948691488584166,
+                "src_cls_loss_wt": 5.9710492380954685,
+            },
+            "MMDA": {
+                "mmd_wt": 9.950704344756812,
+                "disc_lr": 0.005,
+                "coral_wt": 6.944025102729638,
+                "lr_decay": 0.7,
+                "optimizer": 'adam',
+                "step_size": 10,
+                "cond_ent_wt": 7.37132848461175,
+                "weight_decay": 1e-06,
+                "learning_rate": 0.0005,
+                "src_cls_loss_wt": 0.5267867845290276,
+            },
+            "Deep_Coral": {
+                "disc_lr": 0.01,
+                "coral_wt": 9.86162450811459,
+                "lr_decay": 0.9,
+                "optimizer": 'adam',
+                "step_size": 5,
+                "weight_decay": 0.0001,
+                "learning_rate": 0.005,
+                "src_cls_loss_wt": 5.758879765148073,
+            },
+            "CDAN": {
+                "disc_lr": 0.005,
+                "lr_decay": 0.5,
+                "optimizer": 'adam',
+                "step_size": 10,
+                "cond_ent_wt": 0.9445982711144512,
+                "weight_decay": 0.0001,
+                "learning_rate": 0.001,
+                "domain_loss_wt": 8.074945113088715,
+                "src_cls_loss_wt": 6.386895358857728,
+            },
+            "AdvSKM": {
+                "disc_lr": 0.001,
+                "lr_decay": 0.7,
+                "optimizer": 'adam',
+                "step_size": 5,
+                "weight_decay": 0.0001,
+                "learning_rate": 0.005,
+                "domain_loss_wt": 0.41537061835378414,
+                "src_cls_loss_wt": 6.3823547207574185,
+            },
+            "HoMM": {
+                "disc_lr": 0.01,
+                "hommd_wt": 9.289884115855338,
+                "lr_decay": 0.9,
+                "optimizer": 'adam',
+                "step_size": 30,
+                "weight_decay": 1e-05,
+                "learning_rate": 0.001,
+                "domain_loss_wt": 9.13,
+                "src_cls_loss_wt": 1.595688943367404,
+            },
+            'CoTMix': {
+                "disc_lr": 0.01,
+                "lr_decay": 0.7,
+                "mix_ratio": 0.5880989475858244,
+                "optimizer": 'adam',
+                "step_size": 10,
+                "weight_decay": 1e-06,
+                "learning_rate": 0.0005,
+                "src_cls_weight": 0.16596516859598348,
+                "temporal_shift": 5,
+                "trg_cont_weight": 0.356628889079955,
+                "src_supCon_weight": 0.7727331704741203,
+                "trg_entropy_weight": 0.4575796701016314,
+                       },
+
+            'MCD': {
+                'learning_rate': 1e-2, 'src_cls_loss_wt': 9.74, 'domain_loss_wt': 5.43},
+
+            "SWL_Adapt": {
+                "WA_lr": 0.0001,
+                "w_c_T": 0.010618474765039965,
+                "disc_lr": 0.01,
+                "WA_N_hid": 8,
+                "lr_decay": 0.7,
+                "optimizer": 'adam',
+                "step_size": 5,
+                "weight_decay": 1e-06,
+                "learning_rate": 0.0001,
+                "confidence_rate": 0.9,
+            },
+            "uDAR": {
+                "sigma": 0.06825848722473553,
+                "disc_lr": 0.005,
+                "r_theta": 21.299151673145488,
+                "lr_decay": 0.9,
+                "kl_weight": 8.271976440638383,
+                "optimizer": 'adam',
+                "step_size": 5,
+                "cmmd_gamma": 0.0012860190895858598,
+                "cmmd_weight": 0.44548963484511367,
+                "weight_decay": 1e-06,
+                "learning_rate": 0.0006735493685531465,
+                "temporal_alpha": 0.6066309488604633,
+                "cmmd_lambda_reg": 0.001712235137471845,
+                        },
+
+
+        }
+
+class RealWorld():
+    def __init__(self):
+        super(RealWorld, self).__init__()
+        self.train_params = {
+            'num_epochs': 40,
+            'batch_size': 32,
+            'weight_decay': 1e-4,
+            'step_size': 50,
+            'lr_decay': 0.5
+
+        }
+        self.alg_hparams = {
+            'NO_ADAPT': {'learning_rate': 1e-3, 'src_cls_loss_wt': 1},
+            'TARGET_ONLY': {'learning_rate': 1e-3, 'trg_cls_loss_wt': 1},
+            "SASA": {
+                "domain_loss_wt": 7.3937939938562,
+                "learning_rate": 0.005,
+                "src_cls_loss_wt": 4.185814373345016,
+                "weight_decay": 0.0001
+            },
+            "DDC": {
+                "learning_rate": 0.001,
+                "mmd_wt": 3.7991920933520342,
+                "src_cls_loss_wt": 6.286301875125623,
+                "domain_loss_wt": 6.36,
+                "weight_decay": 0.0001
+            },
+            "CoDATS": {
+                "domain_loss_wt": 3.2750474868706925,
+                "learning_rate": 0.001,
+                "src_cls_loss_wt": 6.335109786953256,
+                "weight_decay": 0.0001
+            },
+            "DANN": {
+                "domain_loss_wt": 2.943729820531079,
+                "learning_rate": 0.001,
+                "src_cls_loss_wt": 5.1390077646202,
+                "weight_decay": 0.0001
+            },
+            "DIRT": {
+                "cond_ent_wt": 1.20721518968644,
+                "domain_loss_wt": 1.9012145515129044,
+                "learning_rate": 0.005,
+                "src_cls_loss_wt": 9.67861021290254,
+                "vat_loss_wt": 7.7102843136045855,
+                "weight_decay": 0.0001
+            },
+            "DSAN": {
+                "learning_rate": 0.001,
+                "mmd_wt": 2.0872340713147786,
+                "src_cls_loss_wt": 1.8744909939900247,
+                "domain_loss_wt": 1.59,
+                "weight_decay": 0.0001
+            },
+            "MMDA": {
+                "cond_ent_wt": 1.383002023133561,
+                "coral_wt": 8.36810764913737,
+                "learning_rate": 0.001,
+                "mmd_wt": 3.964042918489996,
+                "src_cls_loss_wt": 6.794522068759213,
+                "weight_decay": 0.0001
+            },
+            "Deep_Coral": {
+                "coral_wt": 4.23035475456397,
+                "learning_rate": 0.0005,
+                "src_cls_loss_wt": 0.1013209750429822,
+                "weight_decay": 0.0001
+            },
+            "CDAN": {
+                "cond_ent_wt": 1.2920143348777362,
+                "domain_loss_wt": 9.545761950873414,
+                "learning_rate": 0.001,
+                "src_cls_loss_wt": 9.430292987535724,
+                "weight_decay": 0.0001
+            },
+            "AdvSKM": {
+                "domain_loss_wt": 1.338788378230754,
+                "learning_rate": 0.0005,
+                "src_cls_loss_wt": 2.468525942065072,
+                "weight_decay": 0.0001
+            },
+            "HoMM": {
+                "hommd_wt": 2.8305712579412683,
+                "learning_rate": 0.0005,
+                "src_cls_loss_wt": 0.1282520874653523,
+                "domain_loss_wt": 9.13,
+                "weight_decay": 0.0001
+            },
+            'CoTMix': {'learning_rate': 0.001, 'mix_ratio': 0.9, 'temporal_shift': 14,
+                       'src_cls_weight': 0.78, 'src_supCon_weight': 0.1, 'trg_cont_weight': 0.1,
+                       'trg_entropy_weight': 0.05},
+            'MCD': {'learning_rate': 1e-2, 'src_cls_loss_wt': 9.74, 'domain_loss_wt': 5.43},
+
+            "SWL_Adapt": {
+                "learning_rate": 1e-3,
+                "step_size": 50,
+                "lr_decay": 0.5,
+                "WA_N_hid": 7,      # Hidden units for Weight Allocator
+                "WA_lr": 1e-4,       # Separate LR for Weight Allocator
+                "confidence_rate": 0.7, # Threshold for pseudo-labels
+                "w_c_T": 0.1           # Weight for target classification loss
+            },
+         "uDAR": {
+                "learning_rate": 0.0003,  # Use the paper's LR 
+                    "weight_decay": 1e-5,     # (This is a fine default)
+                    "step_size": 40,          # (Let's adjust this for the new epoch count)
+                    "lr_decay": 0.1,
+                    "batch_size": 64,         # <-- CRITICAL: Match paper 
+                    "num_epochs": 128,        # <-- CRITICAL: Match paper 
+
+                    # --- uDAR-Specific Params ---
+                    "cmmd_weight": 0.6,       # <-- CRITICAL: Match paper (0.55-0.75) 
+                    "kl_weight": 0.1,         # <-- CRITICAL: Match paper (0.01-0.10) 
+                    "temporal_alpha": 0.6,    # <-- CRITICAL: Keep this! Paper says it's optimal [cite: 230, 265]
+                    
+                    # --- Tunable Kernel/Augmentation Params ---
+                    "cmmd_gamma": 1.0,        # (This is a good start)
+                    "cmmd_lambda_reg": 0.6,   # (Matches your notebook)
+                    "jitter_sigma": 0.03,     # (Keep this low)
+                    "rotate_degree": 5        # (Keep this low)          
+                        },
+
+
+        }

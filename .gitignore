@@ -1,0 +1,25 @@
+# OS & IDE
+.DS_Store
+.idea/
+
+# Python
+__pycache__/
+
+# Machine Learning / Tracking (These caused the hang!)
+mlartifacts/
+mlruns/
+mlruns_hparamseed/
+wandb/
+
+# Logs & Outputs
+*.log
+logs/
+experiments_logs/
+run_logs/
+
+# Data & Plots 
+*.csv
+plots_and_csv/
+images/
+media/
+output.png

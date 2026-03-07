@@ -1,0 +1,205 @@
+## The cuurent hyper-parameters values are not necessarily the best ones for a specific risk.
+def get_hparams_class(dataset_name):
+    """Return the dataset class with the given name."""
+    
+    dataset_name='ALL'  # Forcing ALL for all datasets for now.
+    if dataset_name not in globals():
+        raise NotImplementedError("Dataset not found: {}".format(dataset_name))
+    return globals()[dataset_name]
+
+
+
+class ALL():
+    def __init__(self):
+        super(ALL, self).__init__()
+        self.train_params = {
+            'num_epochs': 40,
+            # 'batch_size': 300,
+            # 'weight_decay': 1e-4,
+            # 'step_size': 50,
+            # 'lr_decay': 0.5
+
+        }
+        self.alg_hparams = {
+            'NO_ADAPT': {'lr_decay': 0.5,'step_size': 50,'weight_decay': 1e-4,'learning_rate': 1e-3, 'src_cls_loss_wt': 1,'batch_size':32},
+
+            "SASA": {
+                'batch_size': 32,
+                'disc_lr': 0.001,
+                'domain_loss_wt': 6.160206787929999,
+                'learning_rate': 0.0005,
+                'lr_decay': 0.9,
+                'optimizer': 'adam',
+                'src_cls_loss_wt': 1.67949841404351,
+                'step_size': 10,
+                'weight_decay': 0.0001,
+            },
+            "DDC": {
+                'batch_size': 64,
+                'disc_lr': 0.01,
+                'domain_loss_wt': 5.243235004706272,
+                'learning_rate': 0.0005,
+                'lr_decay': 0.9,
+                'mmd_wt': 6.50125834083961,
+                'optimizer': 'adam',
+                'src_cls_loss_wt': 4.6310408212363265,
+                'step_size': 30,
+                'weight_decay': 1e-06,
+            },
+            "CoDATS": {
+                'batch_size': 64,
+                'disc_lr': 0.001,
+                'domain_loss_wt': 7.63935431819322,
+                'learning_rate': 0.0005,
+                'lr_decay': 0.9,
+                'optimizer': 'adam',
+                'src_cls_loss_wt': 1.649846016431999,
+                'step_size': 5,
+                'weight_decay': 0.0001,
+            },
+            "DANN": {
+                'batch_size': 64,
+                'disc_lr': 0.0005,
+                'domain_loss_wt': 8.376114206924997,
+                'learning_rate': 0.001,
+                'lr_decay': 0.7,
+                'optimizer': 'adam',
+                'src_cls_loss_wt': 0.8979284159384516,
+                'step_size': 30,
+                'weight_decay': 0.0001,
+            },
+            "DIRT": {
+                'batch_size': 32,
+                'cond_ent_wt': 6.082064449317568,
+                'disc_lr': 0.005,
+                'domain_loss_wt': 2.3023121526301593,
+                'learning_rate': 0.001,
+                'lr_decay': 0.5,
+                'optimizer': 'adam',
+                'src_cls_loss_wt': 9.884622271006725,
+                'step_size': 5,
+                'vat_loss_wt': 6.073107433101607,
+                'weight_decay': 1e-06,
+            },
+            "DSAN": {
+                'batch_size': 32,
+                'disc_lr': 0.005,
+                'domain_loss_wt': 1.6940799032767755,
+                'learning_rate': 0.0005,
+                'lr_decay': 0.5,
+                'mmd_wt': 3.970861892558717,
+                'optimizer': 'adam',
+                'src_cls_loss_wt': 5.741620897306551,
+                'step_size': 5,
+                'weight_decay': 1e-05,
+            },
+            "MMDA": {
+                'batch_size': 32,
+                'cond_ent_wt': 7.37132848461175,
+                'coral_wt': 6.944025102729638,
+                'disc_lr': 0.005,
+                'learning_rate': 0.0005,
+                'lr_decay': 0.7,
+                'mmd_wt': 9.950704344756812,
+                'optimizer': 'adam',
+                'src_cls_loss_wt': 0.5267867845290276,
+                'step_size': 10,
+                'weight_decay': 1e-06,
+            },
+            "Deep_Coral": {
+                'batch_size': 64,
+                'coral_wt': 2.112819107500978,
+                'disc_lr': 0.001,
+                'learning_rate': 0.0005,
+                'lr_decay': 0.5,
+                'optimizer': 'adam',
+                'src_cls_loss_wt': 8.857331451506584,
+                'step_size': 5,
+                'weight_decay': 0.0001,
+            },
+            "CDAN": {
+                'batch_size': 64,
+                'cond_ent_wt': 7.787597554811252,
+                'disc_lr': 0.005,
+                'domain_loss_wt': 3.38320555615145,
+                'learning_rate': 0.0005,
+                'lr_decay': 0.7,
+                'optimizer': 'adam',
+                'src_cls_loss_wt': 8.664756907038035,
+                'step_size': 30,
+                'weight_decay': 1e-06,
+            },
+            "AdvSKM": {
+                'batch_size': 64,
+                'disc_lr': 0.0005,
+                'domain_loss_wt': 3.835004093111962,
+                'learning_rate': 0.0005,
+                'lr_decay': 0.7,
+                'optimizer': 'adam',
+                'src_cls_loss_wt': 8.844574274611618,
+                'step_size': 10,
+                'weight_decay': 0.0001,
+            },
+            "HoMM": {
+                'batch_size': 64,
+                'disc_lr': 0.005,
+                'domain_loss_wt': 1.1322927007028205,
+                'hommd_wt': 1.2700550332929843,
+                'learning_rate': 0.0005,
+                'lr_decay': 0.9,
+                'optimizer': 'adam',
+                'src_cls_loss_wt': 9.221300659963797,
+                'step_size': 10,
+                'weight_decay': 1e-05,
+            },
+            'CoTMix': {
+                'batch_size': 64,
+                'disc_lr': 0.0005,
+                'learning_rate': 0.005,
+                'lr_decay': 0.5,
+                'mix_ratio': 0.5849028453103859,
+                'optimizer': 'adam',
+                'src_cls_weight': 0.630044012578947,
+                'src_supCon_weight': 0.6907031432347459,
+                'step_size': 5,
+                'temporal_shift': 10,
+                'trg_cont_weight': 0.028490029791534588,
+                'trg_entropy_weight': 0.6600160785339345,
+                'weight_decay': 1e-05,
+                       },
+            'MCD': {
+                'weight_decay': 1e-4,'learning_rate': 1e-2, 'src_cls_loss_wt': 9.74, 'domain_loss_wt': 5.43
+                },
+
+            "SWL_Adapt": {
+                'WA_N_hid': 16,
+                'WA_lr': 0.0001,
+                'batch_size': 32,
+                'confidence_rate': 0.6,
+                'disc_lr': 0.005,
+                'learning_rate': 0.0001,
+                'lr_decay': 0.9,
+                'optimizer': 'adam',
+                'step_size': 5,
+                'w_c_T': 0.23245529103760124,
+                'weight_decay': 0.0001,
+            },
+            "uDAR": {
+                'batch_size': 32,
+                'cmmd_gamma': 0.00911648145564596,
+                'cmmd_lambda_reg': 0.030096345104663323,
+                'cmmd_weight': 0.27205147772397115,
+                'disc_lr': 0.01,
+                'kl_weight': 0.07469454262719769,
+                'learning_rate': 0.000977723514617274,
+                'lr_decay': 0.7,
+                'optimizer': 'adam',
+                'r_theta': 36.98823017205767,
+                'sigma': 0.06886962098058332,
+                'step_size': 10,
+                'temporal_alpha': 0.5710922988208587,
+                'weight_decay': 0.0001,
+                        },
+
+
+        }
