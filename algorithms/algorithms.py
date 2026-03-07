@@ -1833,3 +1833,157 @@ class uDAR(Algorithm):
 
             # --- End of Epoch ---
             self.lr_scheduler.step()
+
+
+class DAAN(Algorithm):
+    """
+    DAAN: Dynamic Adversarial Adaptation Networks
+    https://arxiv.org/abs/1911.08939
+    Combines global and local (per-class) domain alignment with a dynamic
+    weighting mechanism (MU) that automatically balances their contributions.
+    """
+
+    def __init__(self, backbone, configs, hparams, device):
+        super().__init__(configs, backbone)
+
+        self.hparams = hparams
+        self.device = device
+        self.num_classes = configs.num_classes
+
+        feat_dim = configs.features_len * configs.final_out_channels
+
+        # Global domain discriminator (same layer structure as original DAAN)
+        self.domain_classifier = nn.Sequential(
+            nn.Linear(feat_dim, 1024),
+            nn.ReLU(True),
+            nn.Dropout(),
+            nn.Linear(1024, 1024),
+            nn.ReLU(True),
+            nn.Dropout(),
+            nn.Linear(1024, 2)
+        )
+
+        # Local (per-class) domain discriminators — one per class, same architecture
+        self.dcis = nn.ModuleList()
+        for i in range(self.num_classes):
+            self.dcis.append(nn.Sequential(
+                nn.Linear(feat_dim, 1024),
+                nn.ReLU(True),
+                nn.Dropout(),
+                nn.Linear(1024, 1024),
+                nn.ReLU(True),
+                nn.Dropout(),
+                nn.Linear(1024, 2)
+            ))
+
+        # Single optimizer for all parameters (backbone + classifier + discriminators)
+        self.optimizer = torch.optim.Adam(
+            list(self.network.parameters()) +
+            list(self.domain_classifier.parameters()) +
+            list(self.dcis.parameters()),
+            lr=hparams["learning_rate"],
+            weight_decay=hparams["weight_decay"]
+        )
+        self.lr_scheduler = StepLR(self.optimizer, step_size=hparams['step_size'], gamma=hparams['lr_decay'])
+
+        # Dynamic MU state (persists across epochs)
+        self.D_M = 0
+        self.D_C = 0
+        self.MU = 0
+
+    def training_epoch(self, src_loader, trg_loader, avg_meter, epoch):
+        joint_loader = enumerate(zip(src_loader, trg_loader))
+        num_batches = min(len(src_loader), len(trg_loader))
+
+        # ---- Update MU per epoch (dynamic global/local balance) ----
+        if self.D_M == 0 and self.D_C == 0 and self.MU == 0:
+            self.MU = 0.5
+        else:
+            d_m_avg = self.D_M / num_batches
+            d_c_avg = self.D_C / num_batches
+            self.MU = 1 - d_m_avg / (d_m_avg + d_c_avg + 1e-12)
+
+        d_m = 0
+        d_c = 0
+
+        for step, ((src_x, src_y), (trg_x, _)) in joint_loader:
+            src_x, src_y, trg_x = src_x.to(self.device), src_y.to(self.device), trg_x.to(self.device)
+
+            p = float(step + epoch * num_batches) / self.hparams["num_epochs"] / num_batches
+            alpha = 2. / (1. + np.exp(-10 * p)) - 1
+
+            self.optimizer.zero_grad()
+
+            # ---- Extract features ----
+            src_feat = self.feature_extractor(src_x)
+            trg_feat = self.feature_extractor(trg_x)
+
+            # ---- Classification ----
+            src_pred = self.classifier(src_feat)
+            trg_pred = self.classifier(trg_feat)
+            src_cls_loss = self.cross_entropy(src_pred, src_y)
+
+            # Softmax probabilities (used for per-class weighting)
+            p_source = F.softmax(src_pred, dim=1)
+            p_target = F.softmax(trg_pred, dim=1)
+
+            # ---- Gradient reversal ----
+            src_feat_reversed = ReverseLayerF.apply(src_feat, alpha)
+            trg_feat_reversed = ReverseLayerF.apply(trg_feat, alpha)
+
+            # ---- Global domain discrimination ----
+            s_domain_output = self.domain_classifier(src_feat_reversed)
+            t_domain_output = self.domain_classifier(trg_feat_reversed)
+
+            sdomain_label = torch.zeros(len(src_x)).long().to(self.device)
+            tdomain_label = torch.ones(len(trg_x)).long().to(self.device)
+
+            err_s_domain = self.cross_entropy(s_domain_output, sdomain_label)
+            err_t_domain = self.cross_entropy(t_domain_output, tdomain_label)
+
+            # ---- Local (per-class) domain discrimination ----
+            loss_s = 0.0
+            loss_t = 0.0
+            tmpd_c = 0
+            for i in range(self.num_classes):
+                # Weight features by class probability
+                ps = p_source[:, i].reshape((src_x.shape[0], 1))
+                fs = ps * src_feat_reversed
+                pt = p_target[:, i].reshape((trg_x.shape[0], 1))
+                ft = pt * trg_feat_reversed
+
+                loss_si = self.cross_entropy(self.dcis[i](fs), sdomain_label)
+                loss_ti = self.cross_entropy(self.dcis[i](ft), tdomain_label)
+                loss_s += loss_si
+                loss_t += loss_ti
+                tmpd_c += 2 * (1 - 2 * (loss_si + loss_ti))
+
+            tmpd_c /= self.num_classes
+            d_c += tmpd_c.cpu().item()
+
+            # ---- Combine losses ----
+            global_loss = self.hparams["global_loss_wt"] * (err_s_domain + err_t_domain)
+            local_loss = self.hparams["local_loss_wt"] * (loss_s + loss_t)
+
+            d_m += 2 * (1 - 2 * global_loss.cpu().item())
+
+            join_loss = (1 - self.MU) * global_loss + self.MU * local_loss
+            loss = self.hparams["src_cls_loss_wt"] * src_cls_loss + join_loss
+
+            loss.backward()
+            self.optimizer.step()
+
+            losses = {
+                'Total_loss': loss.item(),
+                'Src_cls_loss': src_cls_loss.item(),
+                'Global_loss': global_loss.item(),
+                'Local_loss': local_loss.item(),
+            }
+
+            for key, val in losses.items():
+                avg_meter[key].update(val, src_x.size(0))
+
+        # Persist D_M, D_C for next epoch's MU computation
+        self.D_M = d_m
+        self.D_C = d_c
+        self.lr_scheduler.step()

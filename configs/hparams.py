@@ -200,6 +200,16 @@ class ALL():
                 'temporal_alpha': 0.5710922988208587,
                 'weight_decay': 0.0001,
                         },
+            "DAAN": {
+                'batch_size': 32,
+                'learning_rate': 0.001,
+                'lr_decay': 0.7,
+                'step_size': 30,
+                'weight_decay': 0.0001,
+                'src_cls_loss_wt': 1.0,
+                'global_loss_wt': 0.05,
+                'local_loss_wt': 0.01,
+            },
 
 
         }

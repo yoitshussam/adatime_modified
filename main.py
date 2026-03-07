@@ -29,7 +29,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_runs',               default=1,                          type=int, help='Number of consecutive run with different seeds')
     parser.add_argument('--device',                 default= "cuda",                   type=str, help='cpu or cuda')
     
-    methods=['NO_ADAPT','Deep_Coral','DDC', 'MMDA', 'DANN', 'CDAN', 'DIRT', 'DSAN', 'HoMM', 'CoDATS', 'AdvSKM','SASA', 'CoTMix','SWL_Adapt',"uDAR"]
+    methods=['NO_ADAPT','Deep_Coral','DDC', 'MMDA', 'DANN', 'CDAN', 'DIRT', 'DSAN', 'HoMM', 'CoDATS', 'AdvSKM','SASA', 'CoTMix','SWL_Adapt',"uDAR","DAAN"]
     # arguments
 
     args = parser.parse_args()
