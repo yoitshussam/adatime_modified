@@ -55,6 +55,28 @@ class ALL():
         self.hidden_dim = 500
         self.disc_hid_dim = 100
 
+        # ACON-specific
+        self.period = 64
+        self.avg_mode = 10
+        self.fft_normalize = False
+
+        # RAINCOAT-specific
+        self.fourier_modes = 64
+        self.kernel_size = 5
+        # out_dim = fourier_modes*2 (freq amp+phase) + final_out_channels*features_len (temporal)
+        self.out_dim = self.fourier_modes * 2 + self.final_out_channels * self.features_len
+
+        # SSSS_TSA-specific
+        self.temp = 5.0  # temperature for channel attention softmax
+
+        # CLUDA-specific
+        self.cluda_K = 4096             # queue size (original 24576, reduced for smaller datasets)
+        self.cluda_m = 0.999            # momentum for key encoder
+        self.cluda_T = 0.07             # contrastive temperature
+        self.cluda_num_neighbors = 1    # nearest neighbours for cross-domain CL
+        self.cluda_mlp_hidden_dim = 256 # hidden dim for projector / discriminator
+        self.cluda_use_batch_norm = True
+
 
 # class ALL():
 #     def __init__(self):

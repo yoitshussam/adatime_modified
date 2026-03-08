@@ -5,7 +5,7 @@ import itertools
 import higher
 from models.models import CNN, classifier, ReverseLayerF, Discriminator, RandomLayer, Discriminator_CDAN, \
     codats_classifier, AdvSKM_Disc, CNN_ATTN, SWL_Discriminator, WeightAllocator, ActivityClassifier, FeatureExtracter
-from models.loss import MMD_loss, CORAL, ConditionalEntropyLoss, VAT, LMMD_loss, HoMM_loss, NTXentLoss, SupConLoss
+from models.loss import MMD_loss, CORAL, ConditionalEntropyLoss, VAT, LMMD_loss, HoMM_loss, NTXentLoss, SupConLoss, SinkhornDistance
 from utils import EMA, AverageMeter
 from torch.optim.lr_scheduler import StepLR
 from copy import deepcopy
@@ -15,6 +15,10 @@ from models.HAR_Model import HARmodel
 from models.kCMMD_loss import cmmd_loss as kCMMD_loss
 from models.Consistencyloss import kl_div_loss as consistency_kl_loss
 import math
+from models.acon_modules import FrequencyEncoder, FrequencyClassifierHead, TemporalClassifierHead, ACON_Discriminator
+from models.raincoat_modules import tf_encoder, tf_decoder, Raincoat_classifier
+from models.ssss_tsa_modules import SSSS_SepReps_with_multihead
+from models.cluda_modules import CLUDA_Network, CLUDA_Augmenter
 
 def get_algorithm_class(algorithm_name):
     """Return the algorithm class with the given name."""
@@ -1892,6 +1896,12 @@ class DAAN(Algorithm):
         self.MU = 0
 
     def training_epoch(self, src_loader, trg_loader, avg_meter, epoch):
+        # Ensure discriminators (which have Dropout) are in train mode.
+        # The base update() only calls self.network.train() which covers
+        # feature_extractor + classifier but not our extra modules.
+        self.domain_classifier.train()
+        self.dcis.train()
+
         joint_loader = enumerate(zip(src_loader, trg_loader))
         num_batches = min(len(src_loader), len(trg_loader))
 
@@ -1986,4 +1996,643 @@ class DAAN(Algorithm):
         # Persist D_M, D_C for next epoch's MU computation
         self.D_M = d_m
         self.D_C = d_c
+        self.lr_scheduler.step()
+
+
+##################################################
+##########  ACON Algorithm  ######################
+##################################################
+
+class ACON(Algorithm):
+    """
+    ACON: Adversarial Consistency for Cross-Domain Time Series Adaptation
+    https://openreview.net/pdf?id=cIBSsXowMr
+
+    Uses dual temporal + frequency branches with adversarial domain alignment
+    and cross-branch KL consistency.
+    """
+
+    def __init__(self, backbone, configs, hparams, device):
+        super().__init__(configs, backbone)
+
+        self.hparams = hparams
+        self.device = device
+        self.num_classes = configs.num_classes
+
+        # --- ACON-specific config params (from data_model_configs) ---
+        self.period = configs.period
+        self.avg_mode = configs.avg_mode
+        self.fft_mode = self.period // 2 + 1
+        fft_normalize = getattr(configs, 'fft_normalize', False)
+        assert self.avg_mode < self.fft_mode, \
+            f"avg_mode ({self.avg_mode}) must be < fft_mode ({self.fft_mode})"
+
+        # --- Temporal branch ---
+        # self.feature_extractor is the AdaTime backbone CNN (set by base Algorithm)
+        # Its output dim = configs.features_len * configs.final_out_channels
+        t_feat_dim = configs.features_len * configs.final_out_channels
+        self.t_classifier = TemporalClassifierHead(t_feat_dim, configs.num_classes)
+
+        # --- Frequency branch ---
+        self.f_feature_extractor = FrequencyEncoder(
+            configs.input_channels, configs.input_channels, self.fft_mode, fft_normalize
+        )
+        self.f_classifier = FrequencyClassifierHead(
+            self.fft_mode * configs.input_channels, configs.num_classes
+        )
+
+        # --- Domain discriminator (operates on outer-product of freq & temporal feats) ---
+        self.avg_pooling = nn.AdaptiveAvgPool1d(self.avg_mode)
+        disc_in_dim = t_feat_dim * self.avg_mode
+        self.domain_classifier = ACON_Discriminator(
+            disc_in_dim, hparams['disc_hid_dim']
+        )
+
+        # --- Losses ---
+        self.criterion_cond = ConditionalEntropyLoss().to(device)
+        self.kl = nn.KLDivLoss(reduction=hparams.get('kl_reduction', 'mean'))
+        self.kl_t = hparams.get('kl_t', 1.0)
+
+        # --- Optimizers ---
+        # Main optimizer: backbone + temporal classifier + frequency branch
+        self.optimizer = torch.optim.Adam(
+            list(self.feature_extractor.parameters()) +
+            list(self.t_classifier.parameters()) +
+            list(self.f_feature_extractor.parameters()) +
+            list(self.f_classifier.parameters()),
+            lr=hparams["learning_rate"],
+            weight_decay=hparams["weight_decay"]
+        )
+        # Discriminator optimizer (trained separately with true labels)
+        self.optimizer_disc = torch.optim.Adam(
+            self.domain_classifier.parameters(),
+            lr=hparams["learning_rate"],
+            weight_decay=hparams["weight_decay"]
+        )
+        self.lr_scheduler = StepLR(self.optimizer, step_size=hparams['step_size'], gamma=hparams['lr_decay'])
+
+    # --- ACON helpers ---
+
+    def period_data(self, x, period):
+        """Reshape input into periodic segments for FFT."""
+        B, N = x.size(0), x.size(1)
+        if x.size(2) % period != 0:
+            length = ((x.size(-1) // period) + 1) * period
+            padding = torch.zeros([B, N, length - x.size(2)]).to(x.device)
+            out = torch.cat([x, padding], dim=2)
+        else:
+            length = x.size(2)
+            out = x
+        out = out.reshape(B, N, length // period, period).contiguous()
+        return out
+
+    def get_amplitude(self, x_fft):
+        """Extract amplitude features from FFT output."""
+        a = x_fft.abs()
+        if a.dim() == 4:
+            a = a.mean(dim=2)
+        a_disc = a[:, :, :self.fft_mode]
+        a_disc = self.avg_pooling(a_disc.mean(dim=1)).softmax(-1)
+        a_cls = a[:, :, :self.fft_mode]
+        a_cls = a_cls.reshape(a_cls.size(0), -1)
+        return a_cls, a_disc
+
+    # --- Main training logic ---
+
+    def training_epoch(self, src_loader, trg_loader, avg_meter, epoch):
+        # Ensure all ACON-specific modules are in train mode
+        self.t_classifier.train()
+        self.f_feature_extractor.train()
+        self.f_classifier.train()
+        self.domain_classifier.train()
+
+        joint_loader = enumerate(zip(src_loader, trg_loader))
+
+        for step, ((src_x, src_y), (trg_x, _)) in joint_loader:
+            src_x, src_y, trg_x = src_x.to(self.device), src_y.to(self.device), trg_x.to(self.device)
+            bs = src_x.size(0)
+
+            # === Temporal branch ===
+            src_t_feat = self.feature_extractor(src_x)
+            src_t_pred = self.t_classifier(src_t_feat)
+
+            trg_t_feat = self.feature_extractor(trg_x)
+            trg_t_pred = self.t_classifier(trg_t_feat)
+
+            feat_concat = torch.cat((src_t_feat, trg_t_feat), dim=0)
+
+            # === Frequency branch ===
+            src_f_feat = self.f_feature_extractor(self.period_data(src_x, self.period))
+            trg_f_feat = self.f_feature_extractor(self.period_data(trg_x, self.period))
+
+            src_a_cls, _ = self.get_amplitude(src_f_feat)
+            trg_a_cls, _ = self.get_amplitude(trg_f_feat)
+
+            src_f_pred, src_f_feat_linear = self.f_classifier(src_a_cls, True)
+            trg_f_pred, trg_f_feat_linear = self.f_classifier(trg_a_cls, True)
+
+            src_a_disc = self.avg_pooling(src_f_feat_linear).softmax(-1)
+            trg_a_disc = self.avg_pooling(trg_f_feat_linear).softmax(-1)
+
+            ft_a_concat = torch.cat([src_a_disc, trg_a_disc], dim=0)
+
+            # === Step 1: Update discriminator with TRUE domain labels ===
+            domain_label_src = torch.ones(bs).to(self.device)
+            domain_label_trg = torch.zeros(bs).to(self.device)
+            domain_label_concat = torch.cat((domain_label_src, domain_label_trg), 0).long()
+
+            feat_x_pred = torch.bmm(
+                ft_a_concat.unsqueeze(2), feat_concat.unsqueeze(1)
+            ).view(bs * 2, -1).detach()  # detach so disc update doesn't flow into backbone
+
+            disc_prediction = self.domain_classifier(feat_x_pred)
+            disc_loss = self.cross_entropy(disc_prediction, domain_label_concat)
+
+            self.optimizer_disc.zero_grad()
+            disc_loss.backward()
+            self.optimizer_disc.step()
+
+            # === Step 2: Update backbone/classifiers with FAKE domain labels ===
+            domain_label_src_fake = torch.zeros(bs).long().to(self.device)
+            domain_label_trg_fake = torch.ones(bs).long().to(self.device)
+            domain_label_concat_fake = torch.cat((domain_label_src_fake, domain_label_trg_fake), 0)
+
+            feat_x_pred = torch.bmm(
+                ft_a_concat.unsqueeze(2), feat_concat.unsqueeze(1)
+            ).view(bs * 2, -1)  # no detach — gradients flow back into backbone
+
+            disc_prediction = self.domain_classifier(feat_x_pred)
+            domain_loss = self.cross_entropy(disc_prediction, domain_label_concat_fake)
+
+            # Task classification losses (both branches)
+            src_t_cls_loss = self.cross_entropy(src_t_pred.squeeze(), src_y)
+            src_f_cls_loss = self.cross_entropy(src_f_pred.squeeze(), src_y)
+
+            # Cross-branch KL alignment
+            align_s_tf_loss = self.kl(
+                F.log_softmax(src_t_pred / self.kl_t, dim=-1),
+                F.softmax(src_f_pred / self.kl_t, dim=-1) + 1e-5
+            )
+            align_t_tf_loss = self.kl(
+                F.log_softmax(trg_f_pred / self.kl_t, dim=-1),
+                F.softmax(trg_t_pred / self.kl_t, dim=-1)
+            )
+
+            # Conditional entropy on target
+            entropy_trg_t = self.criterion_cond(trg_t_pred)
+            entropy_trg_f = self.criterion_cond(trg_f_pred)
+
+            # Total loss
+            loss = self.hparams['cls_trade_off'] * (src_t_cls_loss + src_f_cls_loss) \
+                 + self.hparams['domain_trade_off'] * domain_loss \
+                 + self.hparams['entropy_trade_off'] * (entropy_trg_t + entropy_trg_f) \
+                 + self.hparams['align_t_trade_off'] * align_t_tf_loss \
+                 + self.hparams['align_s_trade_off'] * align_s_tf_loss
+
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+
+            losses = {
+                'Total_loss': loss.item(),
+                'Src_cls_loss': (src_t_cls_loss.item() + src_f_cls_loss.item()),
+                'Domain_loss': domain_loss.item(),
+                'Align_s_tf_loss': align_s_tf_loss.item(),
+                'Align_t_tf_loss': align_t_tf_loss.item(),
+                'Entropy_loss': (entropy_trg_t.item() + entropy_trg_f.item()),
+            }
+
+            for key, val in losses.items():
+                avg_meter[key].update(val, src_x.size(0))
+
+        self.lr_scheduler.step()
+
+
+##################################################
+##########  RAINCOAT Algorithm  ##################
+##################################################
+
+class RAINCOAT(Algorithm):
+    """
+    RAINCOAT: Domain Adaptation for Time Series
+    with Reconstruction and Alignment in a Joint Latent Space.
+    https://arxiv.org/abs/2302.03133
+
+    Uses a time-frequency encoder/decoder with Sinkhorn OT alignment.
+    Has two training phases:
+      Phase 1 (update): classification + Sinkhorn alignment + reconstruction
+      Phase 2 (correct): reconstruction-only fine-tuning
+    """
+
+    def __init__(self, backbone, configs, hparams, device):
+        # We call Algorithm.__init__ but override its backbone/classifier.
+        # RAINCOAT has its own tf_encoder and classifier.
+        super().__init__(configs, backbone)
+
+        self.hparams = hparams
+        self.device = device
+
+        # Override the backbone feature_extractor and classifier with RAINCOAT's own
+        self.feature_extractor = tf_encoder(configs).to(device)
+        self.decoder = tf_decoder(configs).to(device)
+        self.classifier = Raincoat_classifier(configs).to(device)
+        # Rebuild self.network so base class checkpointing works
+        self.network = nn.Sequential(self.feature_extractor, self.classifier)
+
+        # Main optimizer (encoder + decoder + classifier)
+        self.optimizer = torch.optim.Adam(
+            list(self.feature_extractor.parameters()) +
+            list(self.decoder.parameters()) +
+            list(self.classifier.parameters()),
+            lr=hparams["learning_rate"],
+            weight_decay=hparams["weight_decay"]
+        )
+        # Correction optimizer (encoder + decoder only, no classifier)
+        self.coptimizer = torch.optim.Adam(
+            list(self.feature_extractor.parameters()) +
+            list(self.decoder.parameters()),
+            lr=hparams["learning_rate"],
+            weight_decay=hparams["weight_decay"]
+        )
+        self.lr_scheduler = StepLR(self.optimizer, step_size=hparams['step_size'], gamma=hparams['lr_decay'])
+
+        # Losses
+        self.recons = nn.L1Loss(reduction='sum').to(device)
+        self.sink = SinkhornDistance(eps=1e-3, max_iter=1000, reduction='sum')
+
+    def training_epoch(self, src_loader, trg_loader, avg_meter, epoch):
+        """Phase 1: Main training with classification + alignment + reconstruction."""
+        self.feature_extractor.train()
+        self.decoder.train()
+        self.classifier.train()
+
+        joint_loader = enumerate(zip(src_loader, trg_loader))
+
+        for step, ((src_x, src_y), (trg_x, _)) in joint_loader:
+            src_x, src_y, trg_x = src_x.to(self.device), src_y.to(self.device), trg_x.to(self.device)
+
+            self.optimizer.zero_grad()
+
+            # Encode
+            src_feat, out_s = self.feature_extractor(src_x)
+            trg_feat, out_t = self.feature_extractor(trg_x)
+
+            # Decode (reconstruct)
+            src_recon = self.decoder(src_feat, out_s)
+            trg_recon = self.decoder(trg_feat, out_t)
+
+            # Reconstruction loss
+            recons_loss = 1e-4 * (self.recons(src_recon, src_x) + self.recons(trg_recon, trg_x))
+            recons_loss.backward(retain_graph=True)
+
+            # Sinkhorn alignment loss
+            dr, _, _ = self.sink(src_feat, trg_feat)
+            sink_loss = dr
+            sink_loss.backward(retain_graph=True)
+
+            # Classification loss
+            src_pred = self.classifier(src_feat)
+            src_cls_loss = self.cross_entropy(src_pred, src_y)
+            src_cls_loss.backward(retain_graph=True)
+
+            self.optimizer.step()
+
+            losses = {
+                'Src_cls_loss': src_cls_loss.item(),
+                'Sink_loss': sink_loss.item(),
+                'Recons_loss': recons_loss.item(),
+            }
+
+            for key, val in losses.items():
+                avg_meter[key].update(val, src_x.size(0))
+
+        self.lr_scheduler.step()
+
+    def correction_epoch(self, src_loader, trg_loader, avg_meter):
+        """Phase 2: Reconstruction-only fine-tuning (correct)."""
+        self.feature_extractor.train()
+        self.decoder.train()
+
+        joint_loader = enumerate(zip(src_loader, trg_loader))
+
+        for step, ((src_x, src_y), (trg_x, _)) in joint_loader:
+            src_x, trg_x = src_x.to(self.device), trg_x.to(self.device)
+
+            self.coptimizer.zero_grad()
+
+            src_feat, out_s = self.feature_extractor(src_x)
+            trg_feat, out_t = self.feature_extractor(trg_x)
+
+            src_recon = self.decoder(src_feat, out_s)
+            trg_recon = self.decoder(trg_feat, out_t)
+
+            recons_loss = 1e-4 * (self.recons(trg_recon, trg_x) + self.recons(src_recon, src_x))
+            recons_loss.backward()
+            self.coptimizer.step()
+
+            losses = {'Recons_loss': recons_loss.item()}
+            for key, val in losses.items():
+                avg_meter[key].update(val, src_x.size(0))
+
+    def update(self, src_loader, trg_loader, avg_meter, val_loader, logger):
+        """
+        Override base update() to implement RAINCOAT's two-phase training:
+        Phase 1: classification + alignment + reconstruction (num_epochs)
+        Phase 2: reconstruction-only correction (num_epochs)
+        """
+        best_src_risk = float('inf')
+        best_model = None
+
+        # === Phase 1: Main training ===
+        logger.debug("===== RAINCOAT Phase 1: Train =====")
+        for epoch in range(1, self.hparams["num_epochs"] + 1):
+            for key in avg_meter.keys():
+                avg_meter[key].reset()
+
+            self.network.train()
+            self.training_epoch(src_loader, trg_loader, avg_meter, epoch)
+
+            # Validation
+            self.network.eval()
+            val_loss_meter = AverageMeter()
+            with torch.no_grad():
+                for val_x, val_y in val_loader:
+                    val_x, val_y = val_x.to(self.device), val_y.to(self.device)
+                    val_feat, _ = self.feature_extractor(val_x)
+                    val_pred = self.classifier(val_feat)
+                    val_loss = self.cross_entropy(val_pred, val_y)
+                    val_loss_meter.update(val_loss.item(), val_x.size(0))
+
+            if (epoch + 1) % 10 == 0 and avg_meter['Src_cls_loss'].avg < best_src_risk:
+                best_src_risk = avg_meter['Src_cls_loss'].avg
+                best_model = deepcopy(self.network.state_dict())
+
+            logger.debug(f'[Phase 1 Epoch : {epoch}/{self.hparams["num_epochs"]}]')
+            for key, val in avg_meter.items():
+                logger.debug(f'{key}\t: {val.avg:2.4f}')
+
+            metrics_to_log = {key: val.avg for key, val in avg_meter.items()}
+            mlflow.log_metrics(metrics_to_log, step=epoch)
+            logger.debug(f'-------------------------------------')
+
+        # === Phase 2: Correction ===
+        logger.debug("===== RAINCOAT Phase 2: Correct =====")
+        for epoch in range(1, self.hparams["num_epochs"] + 1):
+            for key in avg_meter.keys():
+                avg_meter[key].reset()
+
+            self.correction_epoch(src_loader, trg_loader, avg_meter)
+
+            # Validation after correction
+            self.network.eval()
+            with torch.no_grad():
+                for val_x, val_y in val_loader:
+                    val_x, val_y = val_x.to(self.device), val_y.to(self.device)
+                    val_feat, _ = self.feature_extractor(val_x)
+                    val_pred = self.classifier(val_feat)
+                    val_loss = self.cross_entropy(val_pred, val_y)
+                    val_loss_meter.update(val_loss.item(), val_x.size(0))
+
+            if (epoch + 1) % 10 == 0 and avg_meter.get('Src_cls_loss') and avg_meter['Src_cls_loss'].avg < best_src_risk:
+                best_src_risk = avg_meter['Src_cls_loss'].avg
+                best_model = deepcopy(self.network.state_dict())
+
+            logger.debug(f'[Phase 2 Epoch : {epoch}/{self.hparams["num_epochs"]}]')
+            for key, val in avg_meter.items():
+                logger.debug(f'{key}\t: {val.avg:2.4f}')
+
+            metrics_to_log = {f'correct_{key}': val.avg for key, val in avg_meter.items()}
+            mlflow.log_metrics(metrics_to_log, step=self.hparams["num_epochs"] + epoch)
+            logger.debug(f'-------------------------------------')
+
+        last_model = self.network.state_dict()
+        return last_model, best_model
+
+
+# =====================================================================
+# =========================  SSSS_TSA  ================================
+# =====================================================================
+
+class SSSS_TSA(Algorithm):
+    """
+    SSSS_TSA: Sensor-Specific Subspace learning with channel Selection for
+    Time Series domain Adaptation.
+
+    Architecture:
+    - One backbone CNN per input channel (each processes 1 channel independently)
+    - Per-channel classification + Sinkhorn alignment
+    - Multihead attention for learned channel weighting/selection
+    - Combined classification + Sinkhorn alignment on attention-weighted features
+    - Total loss = combined losses + individual channel losses
+    """
+
+    def __init__(self, backbone, configs, hparams, device):
+        super().__init__(configs, backbone)
+
+        true_final_out_channels = configs.final_out_channels  # per-channel feature dim
+        self.true_input_channel = configs.input_channels
+
+        # Override temp from hparams if provided
+        if 'tau_temp' in hparams:
+            configs.temp = hparams['tau_temp']
+
+        # Override default feature_extractor with SepReps (per-channel backbones + attention)
+        self.feature_extractor = SSSS_SepReps_with_multihead(configs, backbone)
+
+        # Per-channel classifiers (input dim = per-channel feature dim * features_len)
+        self.classifier_list_ind = nn.ModuleList([])
+        for k in range(self.true_input_channel):
+            self.classifier_list_ind.append(classifier(configs))
+
+        # Combined classifier (input dim = per-channel dim * num_channels * features_len)
+        configs.final_out_channels = true_final_out_channels * self.true_input_channel
+        self.classifier = classifier(configs)
+        configs.final_out_channels = true_final_out_channels  # restore
+
+        # Rebuild network sequential for base class .train()/.eval() and state_dict
+        self.network = nn.Sequential(self.feature_extractor, self.classifier)
+
+        # Combined optimizer (backbones + individual classifiers + attention + combined classifier)
+        self.optimizer = torch.optim.Adam(
+            list(self.feature_extractor.backbone_nets.parameters()) +
+            list(self.classifier_list_ind.parameters()) +
+            list(self.feature_extractor.multihead_attention.parameters()) +
+            list(self.classifier.parameters()),
+            lr=hparams["learning_rate"],
+            weight_decay=hparams["weight_decay"],
+            betas=(0.5, 0.99)
+        )
+        self.lr_scheduler = StepLR(self.optimizer, step_size=hparams['step_size'], gamma=hparams['lr_decay'])
+
+        # Sinkhorn distance for domain alignment
+        sink_eps = hparams.get('sink_epsilon', 1e-3)
+        self.sink = SinkhornDistance(sink_eps, max_iter=1000, reduction='sum')
+
+        self.hparams = hparams
+        self.device = device
+
+    def training_epoch(self, src_loader, trg_loader, avg_meter, epoch):
+        # classifier_list_ind is not part of self.network, set train explicitly
+        self.classifier_list_ind.train()
+
+        joint_loader = enumerate(zip(src_loader, trg_loader))
+
+        for step, ((src_x, src_y), (trg_x, _)) in joint_loader:
+            src_x, src_y, trg_x = src_x.to(self.device), src_y.to(self.device), trg_x.to(self.device)
+
+            self.optimizer.zero_grad()
+
+            # === Per-channel losses ===
+            src_reps_list = self.feature_extractor.fetch_individual_reps(src_x)
+            trg_reps_list = self.feature_extractor.fetch_individual_reps(trg_x)
+
+            clfr_src_loss = 0
+            align_loss = 0
+            for k in range(self.true_input_channel):
+                # Per-channel classification
+                clfr_k_pred = self.classifier_list_ind[k](src_reps_list[k])
+                clfr_src_loss = clfr_src_loss + self.cross_entropy(clfr_k_pred.squeeze(), src_y)
+                # Per-channel Sinkhorn alignment
+                align_loss_k = self.sink(src_reps_list[k], trg_reps_list[k])[0]
+                align_loss = align_loss + align_loss_k
+
+            loss_ind = (self.hparams["src_cls_loss_wt"] * clfr_src_loss +
+                        self.hparams["domain_loss_wt"] * align_loss)
+
+            # === Combined channel losses (through attention, detached from backbone) ===
+            comb_reps_src, _ = self.feature_extractor.combine_ind_through_attn(src_reps_list)
+            clfr_pred_comb = self.classifier(comb_reps_src)
+            loss_sup_src = self.cross_entropy(clfr_pred_comb.squeeze(), src_y)
+
+            comb_reps_trg, _ = self.feature_extractor.combine_ind_through_attn(trg_reps_list)
+            domain_loss = self.sink(comb_reps_src, comb_reps_trg)[0]
+
+            # Total = combined + individual
+            loss_total = (self.hparams["src_cls_loss_wt"] * loss_sup_src +
+                          self.hparams["domain_loss_wt"] * domain_loss) + loss_ind
+
+            loss_total.backward()
+            self.optimizer.step()
+
+            losses = {
+                'Total_loss': loss_total.item(),
+                'Src_cls_loss': loss_sup_src.item(),
+                'Domain_loss': domain_loss.item(),
+            }
+            for key, val in losses.items():
+                avg_meter[key].update(val, src_x.size(0))
+
+        self.lr_scheduler.step()
+
+
+# =============================================================================
+# =========================  CLUDA  ===========================================
+# =============================================================================
+class CLUDA(Algorithm):
+    """
+    CLUDA: Contrastive Learning for Unsupervised Domain Adaptation of Time Series.
+    Uses a momentum-encoder, queue-based contrastive learning, nearest-neighbour
+    cross-domain alignment, and adversarial domain discrimination.
+    """
+
+    def __init__(self, backbone, configs, hparams, device):
+        super().__init__(configs, backbone)
+
+        # Replace the default feature_extractor with the CLUDA network
+        self.feature_extractor = CLUDA_Network(backbone, configs)
+        self.classifier = classifier(configs)
+        self.network = nn.Sequential(self.feature_extractor, self.classifier)
+
+        self.optimizer = torch.optim.Adam(
+            list(self.feature_extractor.parameters()) + list(self.classifier.parameters()),
+            lr=hparams["learning_rate"],
+            weight_decay=hparams["weight_decay"],
+            betas=(0.5, 0.99),
+        )
+        self.lr_scheduler = StepLR(self.optimizer, step_size=hparams['step_size'], gamma=hparams['lr_decay'])
+
+        self.hparams = hparams
+        self.device = device
+        self.criterion_CL = nn.CrossEntropyLoss()
+
+        # Augmenter will be created lazily on first batch
+        self._augmenter = None
+        self._input_channels = configs.input_channels
+
+    # ---- lazy augmenter creation ----
+    def _get_augmenter(self, seq_len, num_channels):
+        cutout_len = max(1, seq_len // 12)
+        if num_channels != 1:
+            self._augmenter = CLUDA_Augmenter(cutout_length=cutout_len)
+        elif seq_len > 1000:
+            aug = CLUDA_Augmenter(cutout_length=cutout_len, cutout_prob=1,
+                                   crop_min_history=0.25, crop_prob=1, dropout_prob=0.0)
+            aug.augmentations = [aug.history_cutout, aug.history_cutout,
+                                 aug.history_cutout, aug.history_crop,
+                                 aug.gaussian_noise, aug.spatial_dropout]
+            self._augmenter = aug
+        else:
+            self._augmenter = CLUDA_Augmenter(cutout_length=cutout_len, dropout_prob=0.0)
+
+    def _augment(self, x):
+        """Augment a (N, C, L) tensor: transpose to (N, L, C), augment, transpose back."""
+        x_t = x.transpose(1, 2)                         # (N, L, C)
+        mask = torch.ones_like(x_t)
+        x_aug, _ = self._augmenter(x_t, mask)
+        return x_aug.transpose(1, 2)                     # back to (N, C, L)
+
+    def training_epoch(self, src_loader, trg_loader, avg_meter, epoch):
+        joint_loader = enumerate(zip(src_loader, trg_loader))
+        num_batches = min(len(src_loader), len(trg_loader))
+
+        for step, ((src_x, src_y), (trg_x, _)) in joint_loader:
+            src_x, src_y, trg_x = src_x.to(self.device), src_y.to(self.device), trg_x.to(self.device)
+
+            # Lazily build augmenter on first batch
+            if self._augmenter is None:
+                seq_len = src_x.shape[2]   # (N, C, L)
+                self._get_augmenter(seq_len, self._input_channels)
+
+            p = float(step + epoch * num_batches) / self.hparams["num_epochs"] + 1 / num_batches
+            alpha = 2.0 / (1.0 + np.exp(-10 * p)) - 1
+
+            # Create two augmented views of source and target
+            q_src = self._augment(src_x)
+            k_src = self._augment(src_x)
+            q_trg = self._augment(trg_x)
+            k_trg = self._augment(trg_x)
+
+            self.optimizer.zero_grad()
+
+            # Contrastive + domain discrimination forward
+            (logits_s, labels_s, logits_t, labels_t,
+             logits_ts, labels_ts, pred_domain, labels_domain,
+             q_s) = self.feature_extractor.contrastive_update(
+                q_src, k_src, q_trg, k_trg, alpha)
+
+            # Contrastive losses
+            loss_s = self.criterion_CL(logits_s, labels_s)
+            loss_t = self.criterion_CL(logits_t, labels_t)
+            loss_ts = self.criterion_CL(logits_ts, labels_ts)
+
+            # Domain discrimination loss
+            loss_disc = F.binary_cross_entropy(pred_domain, labels_domain)
+
+            # Source classification loss
+            pred_s = self.classifier(q_s)
+            src_cls_loss = self.cross_entropy(pred_s, src_y)
+
+            loss = loss_s + loss_t + loss_ts + loss_disc + src_cls_loss
+
+            loss.backward()
+            self.optimizer.step()
+
+            losses = {
+                'Total_loss': loss.item(),
+                'Src_cls_loss': src_cls_loss.item(),
+                'Domain_loss': loss_disc.item(),
+            }
+            for key, val in losses.items():
+                avg_meter[key].update(val, src_x.size(0))
+
         self.lr_scheduler.step()

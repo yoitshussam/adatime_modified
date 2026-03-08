@@ -19,18 +19,20 @@ if __name__ == "__main__":
 
     # ========= Select the DATASET ==============
     parser.add_argument('--data_path',              default=r'../ADATIME_data',                  type=str, help='Path containing datasets')
-    parser.add_argument('--source_dataset',                default='RealWorld',                      type=str, help='Dataset of choice: (WISDM - EEG - HAR - HHAR_SA)')
-    parser.add_argument('--target_dataset',                default='Pamap2',                      type=str, help='Dataset of choice: (WISDM - EEG - HAR - HHAR_SA)')
+    parser.add_argument('--source_dataset',                default='RealWorld',                      type=str, help='Dataset of choice: (RealWorld - PAMAP2 - Mhealth)')
+    parser.add_argument('--target_dataset',                default='Pamap2',                      type=str, help='Dataset of choice: (RealWorld - PAMAP2 - Mhealth)')
 
     # ========= Select the BACKBONE ==============
-    parser.add_argument('--backbone',               default='CNN',                      type=str, help='Backbone of choice: (CNN - RESNET18 - TCN)')
+    parser.add_argument('--backbone',               default='CNN',                      type=str, help='Backbone of choice: (CNN - HARCNN)')
 
     # ========= Experiment settings ===============
     parser.add_argument('--num_runs',               default=1,                          type=int, help='Number of consecutive run with different seeds')
     parser.add_argument('--device',                 default= "cuda",                   type=str, help='cpu or cuda')
     
-    methods=['NO_ADAPT','Deep_Coral','DDC', 'MMDA', 'DANN', 'CDAN', 'DIRT', 'DSAN', 'HoMM', 'CoDATS', 'AdvSKM','SASA', 'CoTMix','SWL_Adapt',"uDAR","DAAN"]
+    #methods=['NO_ADAPT','Deep_Coral','DDC', 'MMDA', 'DANN', 'CDAN', 'DIRT', 'DSAN', 'HoMM', 'CoDATS', 'AdvSKM','SASA', 'CoTMix','SWL_Adapt',"uDAR","DAAN","ACON","RAINCOAT"]
     # arguments
+    methods=["DAAN","ACON","RAINCOAT","SSSS_TSA","CLUDA"]
+
 
     args = parser.parse_args()
 
