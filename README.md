@@ -10,19 +10,24 @@ metrics, and global-vs-local comparison figures.
 
 ## 1. Requirements
 
-The codebase targets recent PyTorch; matching the versions below is the safest
-bet, anything reasonably close should also work.
+The codebase is developed against the versions below; matching them exactly is
+the safest bet, anything reasonably close should also work.
 
-| Package        | Notes                                  |
-|----------------|----------------------------------------|
-| python         | 3.9+                                   |
-| torch          | CUDA build recommended (`--device cuda`) |
-| numpy, pandas, scipy, scikit-learn |                    |
-| matplotlib, seaborn | analysis notebook figures         |
-| mlflow         | experiment tracking (training)         |
-| wandb          | hyper-parameter sweeps                 |
-| optuna         | sweep search backend                   |
-| tqdm           |                                        |
+| Package        | Version      |
+|----------------|--------------|
+| python         | 3.9.25       |
+| torch          | 2.7.1+cu118  |
+| torchvision    | 0.22.1+cu118 |
+| numpy          | 2.0.2        |
+| pandas         | 2.3.3        |
+| scipy          | 1.13.1       |
+| scikit-learn   | 1.6.1        |
+| matplotlib     | 3.9.4        |
+| seaborn        | 0.13.2       |
+| mlflow         | 3.1.4        |
+| wandb          | 0.23.0       |
+| optuna         | 4.8.0        |
+| tqdm           | 4.67.1       |
 
 ### Start an MLflow server first
 
