@@ -22,6 +22,7 @@ from models.models import get_backbone_class
 from utils import AverageMeter
 
 from trainers.abstract_trainer import AbstractTrainer
+from dataloader.dataloader import data_generator_pt, few_shot_data_generator
 
 warnings.filterwarnings("ignore", category=sklearn.exceptions.UndefinedMetricWarning)
 parser = argparse.ArgumentParser()
@@ -45,6 +46,15 @@ class Trainer(AbstractTrainer):
         # Logging
         self.exp_log_dir = os.path.join(self.home_path, self.save_dir)
         os.makedirs(self.exp_log_dir, exist_ok=True)
+
+    def load_data(self):
+        """Override to use .pt-based loader for sweep datasets."""
+        self.src_train_dl = data_generator_pt(self.source_data_path, self.dataset_configs, self.hparams, 'source', "train")
+        self.src_test_dl  = data_generator_pt(self.source_data_path, self.dataset_configs, self.hparams, 'source', "test")
+        self.src_val_dl   = data_generator_pt(self.source_data_path, self.dataset_configs, self.hparams, 'source', "val")
+
+        self.trg_train_dl = data_generator_pt(self.target_data_path, self.dataset_configs, self.hparams, 'target', "train")
+        self.trg_test_dl  = data_generator_pt(self.target_data_path, self.dataset_configs, self.hparams, 'target', "test")
 
     def sweep(self):
         # Reset counter at the start of each sweep
@@ -80,7 +90,7 @@ class Trainer(AbstractTrainer):
         # create tables for results and risks
         columns = ["scenario", "run", "acc", "f1_score", "auroc"]
         table_results = wandb.Table(columns=columns, allow_mixed_types=True)
-        columns = ["scenario", "run", "src_risk", "few_shot_risk", "trg_risk"]
+        columns = ["scenario", "run", "src_risk", "trg_risk"]
         table_risks = wandb.Table(columns=columns, allow_mixed_types=True)
 
         for run_id in range(self.num_runs):

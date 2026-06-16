@@ -135,6 +135,11 @@ class AbstractTrainer(object):
                 if (self.da_method=='uDAR'):
                     predictions, _ = self.algorithm.network(data) 
 
+                    # RAINCOAT's tf_encoder returns (features, out_ft) tuple
+                elif (self.da_method=='RAINCOAT'):
+                    features, _ = self.algorithm.feature_extractor(data)
+                    predictions = self.algorithm.classifier(features)
+
                     # Standard path for DANN, Deep_Coral, etc.
                 else:
                     features = self.algorithm.feature_extractor(data)

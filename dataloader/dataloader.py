@@ -86,8 +86,8 @@ def data_generator(data_path, dataset_configs, hparams, flag):
     activity_mapping = {
         'sitting': 'sitting',
         'Sitting and relaxing': 'sitting',
-        'standing': 'standing',
-        'Standing still': 'standing',
+        # 'standing': 'standing',
+        # 'Standing still': 'standing',
         'lying': 'lying',
         'Lying down': 'lying',
         'running': 'running',
@@ -104,6 +104,7 @@ def data_generator(data_path, dataset_configs, hparams, flag):
     # Load data using load_labelled_and_unlabelled
     prepared_datasets, _, _ = load_labelled_and_unlabelled(
         labelled_dataset_path=pkl_path,
+        window_size=dataset_configs.sequence_len,
         unlabelled_dataset_path=pkl_path if flag == 'target' else None,  # Use unlabeled for target
         activity_mapping=activity_mapping,
         verbose=0,
@@ -143,6 +144,50 @@ def data_generator(data_path, dataset_configs, hparams, flag):
         ))
 
     return data_loaders
+
+def data_generator_pt(data_path, dataset_configs, hparams, flag, dtype):
+    """
+    Load data from pre-split .pt files (train.pt, test.pt, val.pt).
+    Used by the sweep pipeline for datasets like RealWorld_Female / RealWorld_Male.
+
+    Args:
+        data_path: Directory containing train.pt, test.pt, val.pt
+        dataset_configs: Dataset configuration object
+        hparams: Hyperparameters dictionary
+        flag: 'source' or 'target'
+        dtype: 'train', 'val', or 'test'
+    """
+    if flag == 'source':
+        dataset_file = torch.load(os.path.join(data_path, f"{dtype}.pt"), weights_only=False)
+    else:
+        # Target: merge all splits into one pool for unsupervised adaptation
+        train_file = torch.load(os.path.join(data_path, "train.pt"), weights_only=False)
+        test_file = torch.load(os.path.join(data_path, "test.pt"), weights_only=False)
+        val_file = torch.load(os.path.join(data_path, "val.pt"), weights_only=False)
+
+        all_samples = np.concatenate((train_file['samples'], val_file['samples'], test_file['samples']), axis=0)
+        all_labels = np.concatenate((train_file['labels'], val_file['labels'], test_file['labels']), axis=0)
+
+        dataset_file = {'samples': all_samples, 'labels': all_labels}
+
+    dataset = Load_Dataset(dataset_file, dataset_configs)
+
+    if dtype == "test":
+        shuffle = False
+        drop_last = False
+    else:
+        shuffle = dataset_configs.shuffle
+        drop_last = dataset_configs.drop_last
+
+    data_loader = torch.utils.data.DataLoader(
+        dataset=dataset,
+        batch_size=hparams["batch_size"],
+        shuffle=shuffle,
+        drop_last=drop_last,
+        num_workers=0,
+    )
+    return data_loader
+
 
 def data_generator_old(data_path, domain_id, dataset_configs, hparams):
     # loading path

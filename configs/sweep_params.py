@@ -1,5 +1,5 @@
 sweep_train_hparams = {
-        'num_epochs':   {'values': [ 5 ]},
+        'num_epochs':   {'values': [ 1 ]},
         'batch_size':   {'values': [32,64]},
         'learning_rate': {'values': [1e-2, 5e-3, 1e-3, 5e-4]},
         'disc_lr':      {'values': [1e-2, 5e-3, 1e-3, 5e-4]},
@@ -138,6 +138,68 @@ sweep_alg_hparams = {
             # Loss weight for target classification =
             'w_c_T':            {'distribution': 'log_uniform_values', 'min': 1e-2, 'max': 1.0}
         },
-        
+
+        # ----------------------------------------------------------------
+        # DAAN — no original codebase; ranges derived from DANN baselines
+        # in AdaTime HAR configs and the DAAN paper structure.
+        # ----------------------------------------------------------------
+        'DAAN': {
+            'learning_rate':    {'values': [5e-3, 1e-3, 5e-4]},
+            'src_cls_loss_wt':  {'distribution': 'uniform', 'min': 0.5, 'max': 5.0},
+            # global_loss_wt: paper uses ~0.05 default, sweep a wider range
+            'global_loss_wt':   {'distribution': 'log_uniform_values', 'min': 0.01, 'max': 1.0},
+            # local_loss_wt: paper uses ~0.01 default
+            'local_loss_wt':    {'distribution': 'log_uniform_values', 'min': 0.001, 'max': 0.5},
+        },
+
+        # ----------------------------------------------------------------
+        # ACON — ranges from original ACON/main.py argparse defaults.
+        # Paper defaults are all 1.0 except entropy_trade_off=0.01.
+        # ----------------------------------------------------------------
+        'ACON': {
+            'learning_rate':        {'values': [5e-3, 1e-3, 5e-4]},
+            'cls_trade_off':        {'distribution': 'uniform', 'min': 0.5, 'max': 5.0},
+            'domain_trade_off':     {'distribution': 'uniform', 'min': 0.1, 'max': 5.0},
+            'entropy_trade_off':    {'distribution': 'log_uniform_values', 'min': 1e-3, 'max': 0.1},
+            'align_s_trade_off':    {'distribution': 'uniform', 'min': 0.1, 'max': 5.0},
+            'align_t_trade_off':    {'distribution': 'uniform', 'min': 0.1, 'max': 5.0},
+            'acon_disc_hid_dim':    {'values': [64, 128, 256]},
+        },
+
+        # ----------------------------------------------------------------
+        # RAINCOAT — from Raincoat/configs/hparams.py HAR class.
+        # Very few tunable params; paper uses fixed lr=5e-4 and 0.5/0.5 weights
+        # for HAR. Sweep around those anchors.
+        # ----------------------------------------------------------------
+        'RAINCOAT': {
+            'learning_rate':    {'values': [1e-3, 5e-4, 1e-4]},
+            'src_cls_loss_wt':  {'distribution': 'uniform', 'min': 0.1, 'max': 2.0},
+            'domain_loss_wt':   {'distribution': 'uniform', 'min': 0.1, 'max': 2.0},
+        },
+
+        # ----------------------------------------------------------------
+        # SSSS_TSA — from SSSS_TSA/configs/hparams.py HAR_UCI class.
+        # Original uses lr=1e-3, src_cls=1.613, domain=1.857, tau varies per
+        # dataset (3 for 3-ch, 9-10 for 9-ch; paper rule: tau ≈ num_channels).
+        # ----------------------------------------------------------------
+        'SSSS_TSA': {
+            'learning_rate':    {'values': [5e-3, 1e-3, 5e-4]},
+            'src_cls_loss_wt':  {'distribution': 'uniform', 'min': 0.5, 'max': 5.0},
+            'domain_loss_wt':   {'distribution': 'uniform', 'min': 0.5, 'max': 5.0},
+            'tau_temp':         {'values': [1, 3, 5, 9, 18]},
+        },
+
+        # ----------------------------------------------------------------
+        # CLUDA — from CLUDA/main/train.py argparse defaults.
+        # Original uses TCN with large batches (bs=2048, lr=5e-5); our port
+        # uses CNN with bs=32, so lr is higher (~1e-3). Queue, momentum, and
+        # temperature are architecture hparams from the CLUDA paper.
+        # ----------------------------------------------------------------
+        'CLUDA': {
+            'learning_rate':    {'values': [5e-3, 1e-3, 5e-4, 1e-4]},
+            'src_cls_loss_wt':  {'distribution': 'uniform', 'min': 0.5, 'max': 5.0},
+            'domain_loss_wt':   {'distribution': 'uniform', 'min': 0.5, 'max': 5.0},
+        },
+
 }
 

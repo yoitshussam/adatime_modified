@@ -163,10 +163,18 @@ class CLUDA_Network(nn.Module):
             return
         bs = keys_s.shape[0]
         ptr = int(self.queue_ptr)
-        if ptr + bs > self.K:
-            bs = self.K - ptr          # trim to avoid overflow
-        self.queue_s[:, ptr:ptr + bs] = keys_s[:bs].T
-        self.queue_t[:, ptr:ptr + bs] = keys_t[:bs].T
+        end = ptr + bs
+        if end <= self.K:
+            self.queue_s[:, ptr:end] = keys_s.T
+            self.queue_t[:, ptr:end] = keys_t.T
+        else:
+            # Wrap around: split the batch across the queue boundary
+            first = self.K - ptr
+            self.queue_s[:, ptr:] = keys_s[:first].T
+            self.queue_t[:, ptr:] = keys_t[:first].T
+            rem = bs - first
+            self.queue_s[:, :rem] = keys_s[first:].T
+            self.queue_t[:, :rem] = keys_t[first:].T
         self.queue_ptr[0] = (ptr + bs) % self.K
 
     # ---------- inference (used by AdaTime evaluate) ----------

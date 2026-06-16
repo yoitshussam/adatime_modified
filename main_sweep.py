@@ -11,9 +11,9 @@ if __name__ == "__main__":
                         help='DANN, Deep_Coral, WDGRL, MMDA, VADA, DIRT, CDAN, ADDA, HoMM, CoDATS')
 
     # ========= Select the DATASET ==============
-    parser.add_argument('--data_path', default=r'../ADATIME_data', type=str, help='Path containing datase2t')
-    parser.add_argument('--source_dataset', default='HAR', type=str, help='Dataset of choice: (WISDM - EEG - HAR - HHAR_SA)')
-    parser.add_argument('--target_dataset', default='HAR', type=str, help='Dataset of choice: (WISDM - EEG - HAR - HHAR_SA)')
+    parser.add_argument('--data_path', default=r'../dataset', type=str, help='Path containing datase2t')
+    parser.add_argument('--source_dataset', default='RealWorld_Male', type=str, help='Dataset of choice: (WISDM - EEG - HAR - HHAR_SA)')
+    parser.add_argument('--target_dataset', default='RealWorld_Female', type=str, help='Dataset of choice: (WISDM - EEG - HAR - HHAR_SA)')
 
     # ========= Select the BACKBONE ==============
     parser.add_argument('--backbone', default='CNN', type=str, help='Backbone of choice: (CNN - RESNET18 - TCN)')
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_sweeps', default=10, type=int, help='Number of sweep runs')
 
     # We run sweeps using wandb plateform, so next parameters are for wandb.
-    parser.add_argument('--sweep_project_wandb', default='Hyperparameter_Tuning', type=str, help='Project name in Wandb')
+    parser.add_argument('--sweep_project_wandb', default='new_hparams', type=str, help='Project name in Wandb')
     parser.add_argument('--wandb_entity', type=str,
                         help='Entity name in Wandb (can be left blank if there is a default entity)')
     parser.add_argument('--hp_search_strategy', default="bayes", type=str,
@@ -40,7 +40,8 @@ if __name__ == "__main__":
                         help='Directory containing all experiments')
 
    
-    methods=[ 'Deep_Coral', 'MMDA', 'DANN', 'CDAN', 'DIRT', 'DSAN', 'HoMM', 'CoDATS', 'AdvSKM', 'SASA', 'CoTMix','SWL_Adapt',"uDAR"]
+    # methods=[ 'Deep_Coral', 'MMDA', 'DANN', 'CDAN', 'DIRT', 'DSAN', 'HoMM', 'CoDATS', 'AdvSKM', 'SASA', 'CoTMix','SWL_Adapt',"uDAR"]
+    methods=["DAAN","ACON","RAINCOAT","SSSS_TSA","CLUDA"]
 
     args = parser.parse_args()
     if(args.da_method=='ALL'):

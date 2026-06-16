@@ -2031,7 +2031,7 @@ class ACON(Algorithm):
         # self.feature_extractor is the AdaTime backbone CNN (set by base Algorithm)
         # Its output dim = configs.features_len * configs.final_out_channels
         t_feat_dim = configs.features_len * configs.final_out_channels
-        self.t_classifier = TemporalClassifierHead(t_feat_dim, configs.num_classes)
+        self.classifier = TemporalClassifierHead(t_feat_dim, configs.num_classes)
 
         # --- Frequency branch ---
         self.f_feature_extractor = FrequencyEncoder(
@@ -2045,7 +2045,7 @@ class ACON(Algorithm):
         self.avg_pooling = nn.AdaptiveAvgPool1d(self.avg_mode)
         disc_in_dim = t_feat_dim * self.avg_mode
         self.domain_classifier = ACON_Discriminator(
-            disc_in_dim, hparams['disc_hid_dim']
+            disc_in_dim, hparams['acon_disc_hid_dim']
         )
 
         # --- Losses ---
@@ -2057,7 +2057,7 @@ class ACON(Algorithm):
         # Main optimizer: backbone + temporal classifier + frequency branch
         self.optimizer = torch.optim.Adam(
             list(self.feature_extractor.parameters()) +
-            list(self.t_classifier.parameters()) +
+            list(self.classifier.parameters()) +
             list(self.f_feature_extractor.parameters()) +
             list(self.f_classifier.parameters()),
             lr=hparams["learning_rate"],
@@ -2101,7 +2101,7 @@ class ACON(Algorithm):
 
     def training_epoch(self, src_loader, trg_loader, avg_meter, epoch):
         # Ensure all ACON-specific modules are in train mode
-        self.t_classifier.train()
+        self.classifier.train()
         self.f_feature_extractor.train()
         self.f_classifier.train()
         self.domain_classifier.train()
@@ -2114,10 +2114,10 @@ class ACON(Algorithm):
 
             # === Temporal branch ===
             src_t_feat = self.feature_extractor(src_x)
-            src_t_pred = self.t_classifier(src_t_feat)
+            src_t_pred = self.classifier(src_t_feat)
 
             trg_t_feat = self.feature_extractor(trg_x)
-            trg_t_pred = self.t_classifier(trg_t_feat)
+            trg_t_pred = self.classifier(trg_t_feat)
 
             feat_concat = torch.cat((src_t_feat, trg_t_feat), dim=0)
 
@@ -2283,18 +2283,18 @@ class RAINCOAT(Algorithm):
 
             # Reconstruction loss
             recons_loss = 1e-4 * (self.recons(src_recon, src_x) + self.recons(trg_recon, trg_x))
-            recons_loss.backward(retain_graph=True)
 
             # Sinkhorn alignment loss
             dr, _, _ = self.sink(src_feat, trg_feat)
             sink_loss = dr
-            sink_loss.backward(retain_graph=True)
 
             # Classification loss
             src_pred = self.classifier(src_feat)
             src_cls_loss = self.cross_entropy(src_pred, src_y)
-            src_cls_loss.backward(retain_graph=True)
 
+            # Combined backward — single pass instead of three retain_graph backwards
+            total_loss = recons_loss + sink_loss + src_cls_loss
+            total_loss.backward()
             self.optimizer.step()
 
             losses = {
@@ -2593,7 +2593,7 @@ class CLUDA(Algorithm):
                 seq_len = src_x.shape[2]   # (N, C, L)
                 self._get_augmenter(seq_len, self._input_channels)
 
-            p = float(step + epoch * num_batches) / self.hparams["num_epochs"] + 1 / num_batches
+            p = float(step + epoch * num_batches) / (self.hparams["num_epochs"] * num_batches)
             alpha = 2.0 / (1.0 + np.exp(-10 * p)) - 1
 
             # Create two augmented views of source and target

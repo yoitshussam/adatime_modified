@@ -28,9 +28,9 @@ class ALL():
         self.dropout = 0.1
         # self.kernel_size=5 is now defined in cnn_blocks
         self.cnn_blocks = [
-            {'kernel_size': 24, 'maxpool': False, 'dropout': True},
-            {'kernel_size': 8, 'maxpool': False, 'dropout': False},
-            {'kernel_size': 8, 'maxpool': False, 'dropout': False},
+            {'kernel_size': 5, 'maxpool': False, 'dropout': True},
+            {'kernel_size': 5, 'maxpool': False, 'dropout': True},
+            {'kernel_size': 5, 'maxpool': False, 'dropout': True},
         ]
 
         # features
