@@ -1,38 +1,31 @@
 # OS & IDE
 .DS_Store
 .idea/
+.claude/
 
 # Python
 __pycache__/
 
-# Machine Learning / Tracking (These caused the hang!)
+# Machine Learning / Tracking
 mlartifacts/
-mlruns/
-mlruns_hparamseed/
+mlruns*/
 wandb/
 
 # Logs & Outputs
 *.log
 logs/
-experiments_logs/
 run_logs/
+experiments_logs/
+output.png
 
-# Data & Plots 
+# Data & Plots
 *.csv
 plots_and_csv/
 images/
 media/
-output.png
 DAAN/
 ACON/
-mlexplain.ipynb
-new.ipynb
-new2.ipynb
-run_experiments.sh
-yo.ipynb
-dataloader/dataloader_backup.py
-dataloader_backup_new.py
-trainers/abstract_trainer_backup.py
-trainers/abstract_trainer_backup_new.py
-trainers/train_backpu.py
-trainers/tryingout.ipynb
+
+# Notebooks & shell scripts
+*.ipynb
+*.sh
