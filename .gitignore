@@ -29,3 +29,6 @@ ACON/
 # Notebooks & shell scripts
 *.ipynb
 *.sh
+
+# Archived wandb sweep scripts
+wandbarchive/

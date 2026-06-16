@@ -1,152 +1,117 @@
+"""Pull the best trial per method from an MLflow sweep and write a JSON file
+shaped like `alg_hparams` in configs/hparams.py — ready to paste into
+`self.alg_hparams = {...}`:
+
+    {
+      "DANN": { "learning_rate": 0.0005, "src_cls_loss_wt": 3.1, ... },
+      "DSAN": { "learning_rate": 0.001,  "mmd_wt": 4.2,          ... },
+      ...
+    }
+
+By default the best trial per method is the one with the lowest avg_trg_risk
+(matching main_sweep.py's default --metric_to_minimize). Use --metric / --goal
+to optimize a different logged metric (e.g. avg_f1_score, maximize).
+
+Run:
+    python extract_best_hparams.py --exp_name sweep_EXP1
+    python extract_best_hparams.py --exp_name sweep_EXP1 --metric avg_f1_score --goal maximize
 """
-Extract best hyperparameters from W&B sweeps and print them in hparams.py format.
-
-Usage:
-    python extract_best_hparams.py --project new_hparams --entity hussamaskar12-rostock
-    python extract_best_hparams.py --project new_hparams --sweep_ids abc123 def456
-    python extract_best_hparams.py --project new_hparams --methods DAAN ACON RAINCOAT
-
-The script finds the best run (lowest trg_risk) per sweep, strips out the shared
-train hparams (batch_size, num_epochs, etc.), and prints the result as a Python
-dict ready to paste into configs/hparams.py.
-"""
-
 import argparse
-import wandb
+import json
+import math
+import os
+import re
+import sys
 
-# Shared training hparams that belong in train_params, not alg_hparams
-TRAIN_HPARAM_KEYS = {
-    'num_epochs', 'batch_size', 'learning_rate', 'disc_lr',
-    'weight_decay', 'step_size', 'optimizer', 'lr_decay',
-}
+import mlflow
+from mlflow.tracking import MlflowClient
 
+METHODS = ['Deep_Coral', 'DDC', 'MMDA', 'DANN', 'CDAN', 'DIRT', 'DSAN', 'HoMM',
+           'CoDATS', 'AdvSKM', 'SASA', 'CoTMix', 'SWL_Adapt', 'uDAR', 'DAAN',
+           'ACON', 'RAINCOAT', 'SSSS_TSA', 'CLUDA']
 
-def get_best_run(sweep, metric='trg_risk', goal='minimize'):
-    """Return the best run in a sweep by the given metric."""
-    runs = list(sweep.runs)
-    if not runs:
-        return None, None
+# Swept params that must be ints (MLflow stores all params as strings).
+INT_KEYS = {"batch_size", "num_epochs", "step_size", "temporal_shift",
+            "WA_N_hid", "acon_disc_hid_dim", "tau_temp"}
 
-    finished = [r for r in runs if r.state == 'finished']
-    if not finished:
-        finished = runs  # fall back to all runs if none finished cleanly
+# Run metadata logged alongside hyperparameters — filtered out of the JSON.
+CONTEXT_KEYS = {"source_dataset", "target_dataset", "backbone", "da_method"}
 
-    def get_metric(run):
-        val = run.summary.get(metric)
-        return val if val is not None else float('inf') if goal == 'minimize' else float('-inf')
-
-    best = min(finished, key=get_metric) if goal == 'minimize' else max(finished, key=get_metric)
-    return best, get_metric(best)
+OUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "best_hparams.json")
 
 
-def format_value(v):
-    """Format a float for clean Python output."""
-    if isinstance(v, float):
-        # Use scientific notation for very small or very large values
-        if abs(v) < 1e-3 or abs(v) >= 1e4:
-            return f"{v:.2e}"
-        return f"{v:.4g}"
-    return repr(v)
+def coerce(key, value):
+    """MLflow stores params as strings — turn them back into int/float."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return value
+    if key in INT_KEYS:
+        return int(round(f))
+    return f
 
 
-def extract_alg_hparams(config: dict) -> dict:
-    """Strip shared train keys, keep only algorithm-specific ones."""
-    return {k: v for k, v in config.items()
-            if k not in TRAIN_HPARAM_KEYS and not k.startswith('_')}
-
-
-def extract_train_hparams(config: dict) -> dict:
-    """Keep only shared training keys."""
-    return {k: v for k, v in config.items()
-            if k in TRAIN_HPARAM_KEYS}
+def parse_method(run_name):
+    if not run_name:
+        return None
+    m = re.match(r"^([A-Za-z_]+)_trial_\d+$", run_name)
+    return m.group(1) if m else None
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--project', required=True, help='W&B project name')
-    parser.add_argument('--entity', default=None, help='W&B entity (username/team)')
-    parser.add_argument('--metric', default='trg_risk', help='Metric to optimise for')
-    parser.add_argument('--goal', default='minimize', choices=['minimize', 'maximize'])
-    parser.add_argument('--sweep_ids', nargs='*', default=None,
-                        help='Specific sweep IDs to extract (default: all in project)')
-    parser.add_argument('--methods', nargs='*', default=None,
-                        help='Filter by method name (matched against sweep name)')
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--exp_name", required=True,
+                    help="The --exp_name that was passed to main_sweep.py")
+    ap.add_argument("--source_dataset", default="RealWorld_Male")
+    ap.add_argument("--target_dataset", default="RealWorld_Female")
+    ap.add_argument("--metric", default="avg_trg_risk",
+                    help="Logged summary metric to select the best trial by")
+    ap.add_argument("--goal", default="minimize", choices=["minimize", "maximize"])
+    args = ap.parse_args()
 
-    api = wandb.Api()
-    entity = args.entity or api.default_entity
-    project_path = f"{entity}/{args.project}"
+    mlflow.set_tracking_uri("http://127.0.0.1:5001")
+    client = MlflowClient()
 
-    if args.sweep_ids:
-        sweeps = [api.sweep(f"{project_path}/{sid}") for sid in args.sweep_ids]
-    else:
-        project = api.project(args.project, entity=entity)
-        sweeps = list(project.sweeps())
+    experiment_name = (f"sweep_{args.source_dataset}_to_"
+                       f"{args.target_dataset}_{args.exp_name}")
+    exp = client.get_experiment_by_name(experiment_name)
+    if exp is None:
+        sys.exit(f"Experiment not found: {experiment_name!r}")
 
-    if not sweeps:
-        print("No sweeps found.")
-        return
+    runs = client.search_runs(experiment_ids=[exp.experiment_id], max_results=10000)
 
-    results = {}  # method_name -> (best_run, metric_value, sweep)
-
-    for sweep in sweeps:
-        sweep_name = sweep.name or sweep.id
-        method_name = sweep_name.split('_')[0] if '_' in sweep_name else sweep_name
-
-        if args.methods and method_name not in args.methods:
+    maximize = args.goal == "maximize"
+    best = {}  # method -> (score, run)
+    for r in runs:
+        method = parse_method(r.data.tags.get("mlflow.runName"))
+        if method not in METHODS:
             continue
-
-        best_run, metric_val = get_best_run(sweep, args.metric, args.goal)
-        if best_run is None:
-            print(f"# Sweep {sweep_name}: no runs found, skipping")
+        score = r.data.metrics.get(args.metric)
+        if score is None or not math.isfinite(score):
             continue
-
-        # Keep the best per method (lowest metric)
-        if method_name not in results:
-            results[method_name] = (best_run, metric_val, sweep_name)
+        if method not in best:
+            best[method] = (score, r)
         else:
-            _, prev_val, _ = results[method_name]
-            if (args.goal == 'minimize' and metric_val < prev_val) or \
-               (args.goal == 'maximize' and metric_val > prev_val):
-                results[method_name] = (best_run, metric_val, sweep_name)
+            cur = best[method][0]
+            if (score > cur) if maximize else (score < cur):
+                best[method] = (score, r)
 
-    if not results:
-        print("No matching sweeps/runs found.")
-        return
+    if not best:
+        sys.exit(f"No completed runs with metric {args.metric!r} in {experiment_name!r}")
 
-    # Print hparams.py snippet
-    print("\n# ============================================================")
-    print("# Best hyperparameters extracted from W&B sweeps")
-    print(f"# Project: {project_path}  |  Metric: {args.metric} ({args.goal})")
-    print("# Paste into configs/hparams.py under self.alg_hparams = { ... }")
-    print("# ============================================================\n")
+    payload = {
+        method: {k: coerce(k, v)
+                 for k, v in best[method][1].data.params.items()
+                 if k not in CONTEXT_KEYS}
+        for method in METHODS if method in best
+    }
 
-    train_hparams_by_method = {}
-
-    for method_name, (best_run, metric_val, sweep_name) in sorted(results.items()):
-        cfg = dict(best_run.config)
-        alg_hparams = extract_alg_hparams(cfg)
-        train_hparams = extract_train_hparams(cfg)
-        train_hparams_by_method[method_name] = train_hparams
-
-        print(f"    # Sweep: {sweep_name}  |  {args.metric}: {metric_val:.4f}  |  run: {best_run.id}")
-        print(f"    '{method_name}': {{", end="")
-        items = list(alg_hparams.items())
-        if not items:
-            print("},")
-        else:
-            print()
-            for k, v in items:
-                print(f"        '{k}': {format_value(v)},")
-            print("    },")
-        print()
-
-    # Also print the best shared train params per method for reference
-    print("\n# ---- Suggested train_params (shared, from best runs) ----")
-    for method_name, tp in sorted(train_hparams_by_method.items()):
-        print(f"# {method_name}: ", end="")
-        print(", ".join(f"{k}={format_value(v)}" for k, v in sorted(tp.items())))
+    with open(OUT_PATH, "w") as f:
+        json.dump(payload, f, indent=4, sort_keys=True)
+    print(f"Wrote {len(payload)} methods -> {OUT_PATH} "
+          f"(best by {args.goal} {args.metric})")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
