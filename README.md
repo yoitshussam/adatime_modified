@@ -4,7 +4,7 @@ A benchmark for **closed-set unsupervised domain adaptation (UDA)** on time-seri
 Human Activity Recognition (HAR). Nineteen adaptation methods — spanning global
 (marginal) alignment and local (class-conditional) alignment families — are run
 under a single training/evaluation protocol across three HAR datasets, with
-Weights & Biases hyper-parameter sweeps, MLflow experiment tracking, and a
+Optuna hyper-parameter sweeps, MLflow experiment tracking, and a
 notebook-based analysis stage that produces confusion matrices, per-class
 metrics, and global-vs-local comparison figures.
 
@@ -25,24 +25,26 @@ the safest bet, anything reasonably close should also work.
 | matplotlib     | 3.9.4        |
 | seaborn        | 0.13.2       |
 | mlflow         | 3.1.4        |
-| wandb          | 0.23.0       |
 | optuna         | 4.8.0        |
 | tqdm           | 4.67.1       |
 
 ### Start an MLflow server first
 
-`main.py` logs to MLflow over HTTP at `http://127.0.0.1:5001`. Launch the
-tracking server **before** training:
+`main.py`, `main_sweep.py`, and `extract_best_hparams.py` all log to / read from
+MLflow over HTTP at `http://127.0.0.1:5001`. Launch the tracking server
+**before** training or sweeping:
 
 ```bash
 mlflow server --host 127.0.0.1 --port 5001
 ```
 
 To use a different port, change it both on the server command line and in the
-`mlflow.set_tracking_uri(...)` call at the top of `main.py`.
+`mlflow.set_tracking_uri(...)` calls at the top of `main.py` / `main_sweep.py` /
+`extract_best_hparams.py`.
 
-Sweeps (`main_sweep.py`) and `extract_best_hparams.py` use **Weights & Biases**
-— run `wandb login` once before sweeping.
+Hyper-parameter search uses **Optuna** (no external login or account required) —
+trials are written straight to MLflow. The old Weights & Biases sweep scripts are
+kept for reference under `wandbarchive/` (git-ignored) and are no longer used.
 
 ## 2. Datasets
 
@@ -145,12 +147,22 @@ bash run_experiments.sh        # EXP_2, 10 seeds, all pairs
 ### 4.2 Hyper-parameter sweep + extraction
 
 Sweep search spaces are defined in `configs/sweep_params.py`
-(`sweep_train_hparams`, `sweep_alg_hparams`). `main_sweep.py` runs W&B/Optuna
-trials; `extract_best_hparams.py` pulls the best trial per method from the W&B
-project.
+(`sweep_train_hparams`, `sweep_alg_hparams`). `main_sweep.py` runs **Optuna**
+trials and logs every trial to MLflow; `extract_best_hparams.py` reads that
+MLflow experiment back and pulls the best trial per method.
+
+The sweep split is `RealWorld_Male` → `RealWorld_Female` (held-out, separate from
+the evaluation pairs). Each trial samples hyper-parameters from
+`configs/sweep_params.py`, trains `--num_runs` seeds, and logs the run-averaged
+metrics (`avg_acc`, `avg_f1_score`, `avg_auroc`, `avg_src_risk`, `avg_trg_risk`).
+
+`--hp_search_strategy` selects the Optuna sampler: `bayes` (TPE, default),
+`random`, or `grid`. `--metric_to_minimize` chooses the objective — `trg_risk`
+(default) or `src_risk` are minimized; `f1_score`, `acc`, `auroc` are maximized
+(negated internally).
 
 ```bash
-# Sweep one method:
+# Sweep one method (50 Optuna trials, 3 seeds each):
 python main_sweep.py \
     --source_dataset RealWorld_Male \
     --target_dataset RealWorld_Female \
@@ -161,16 +173,24 @@ python main_sweep.py \
     --metric_to_minimize trg_risk \
     --exp_name sweep_EXP1
 
-# Extract best hparams for chosen methods from the W&B project:
+# Or sweep every method in one go:
+python main_sweep.py --da_method ALL --num_runs 3 --num_sweeps 50 \
+                     --exp_name sweep_EXP1
+
+# Extract the best trial per method from the MLflow sweep experiment:
 python extract_best_hparams.py \
-    --project new_hparams \
-    --entity <your-wandb-entity> \
-    --methods DAAN ACON RAINCOAT \
-    --metric trg_risk --goal minimize
+    --exp_name sweep_EXP1 \
+    --source_dataset RealWorld_Male \
+    --target_dataset RealWorld_Female \
+    --metric avg_trg_risk --goal minimize
 ```
 
-The extracted values are a reference artifact — copy them into the matching
-`alg_hparams[<method>]` entry in `configs/hparams.py` before re-running
+`main_sweep.py` writes each trial to the MLflow experiment
+`sweep_<source>_to_<target>_<exp_name>`, with run names `<method>_trial_<n>`.
+`extract_best_hparams.py` reads that experiment, picks the best trial per method
+by `--metric` / `--goal` (default: lowest `avg_trg_risk`), and writes
+`best_hparams.json`. Those values are a reference artifact — copy them into the
+matching `alg_hparams[<method>]` entry in `configs/hparams.py` before re-running
 `main.py`.
 
 ### 4.3 Analysis: confusion matrices & comparison figures
@@ -196,7 +216,7 @@ algorithms/algorithms.py    — every DA algorithm (Algorithm subclasses)
 configs/
   data_model_configs.py     — dataset + backbone config (ALL class)
   hparams.py                — train_params + per-method alg_hparams
-  sweep_params.py           — W&B/Optuna sweep search spaces
+  sweep_params.py           — Optuna sweep search spaces
 dataloader/dataloader.py    — windowed-data loaders (data_generator)
 models/models.py            — CNN / HAR_CNN backbones + classifiers
 data_pre_processing.py      — raw HAR → sliding-window pipeline
@@ -204,10 +224,11 @@ load_data.py                — labelled/unlabelled split loader
 trainers/
   abstract_trainer.py       — shared train/eval/checkpoint logic
   train.py                  — Trainer.fit() (single config, MLflow logging)
-  sweep.py                  — Trainer.sweep() (W&B hyper-parameter search)
+  sweep.py                  — Trainer.sweep() (Optuna search, MLflow logging)
 main.py                     — single-config / ALL-methods trainer
-main_sweep.py               — hyper-parameter sweep entry point
-extract_best_hparams.py     — pull best sweep hparams from W&B
+main_sweep.py               — Optuna hyper-parameter sweep entry point
+extract_best_hparams.py     — pull best sweep hparams from MLflow
+wandbarchive/               — old W&B sweep scripts (git-ignored, unused)
 new_fixed.ipynb             — analysis: confusion matrices + comparison figures
 run_experiments*.sh         — full 6-pair training wrappers
 experiments_logs/           — per-run checkpoints, result CSVs, pics/, confusion_matrices/
