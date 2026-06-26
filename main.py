@@ -23,7 +23,7 @@ if __name__ == "__main__":
     parser.add_argument('--target_dataset',                default='Pamap2',                      type=str, help='Dataset of choice: (RealWorld - PAMAP2 - Mhealth)')
 
     # ========= Select the BACKBONE ==============
-    parser.add_argument('--backbone',               default='CNN',                      type=str, help='Backbone of choice: (CNN - HARCNN)')
+    parser.add_argument('--backbone',               default='HAR_CNN',                      type=str, help='Backbone of choice: (CNN - HAR_CNN)')
 
     # ========= Experiment settings ===============
     parser.add_argument('--num_runs',               default=1,                          type=int, help='Number of consecutive run with different seeds')
